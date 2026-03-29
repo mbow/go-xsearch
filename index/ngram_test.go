@@ -142,3 +142,31 @@ func TestSearchResultScore(t *testing.T) {
 	}
 	t.Error("expected to find Budweiser in results")
 }
+
+func TestSearchCategories(t *testing.T) {
+	idx := NewIndex(testProducts())
+	results := idx.SearchCategories("bee")
+	if len(results) == 0 {
+		t.Fatal("expected category results for 'bee'")
+	}
+
+	if results[0] != "beer" {
+		t.Errorf("expected best category 'beer', got %q", results[0])
+	}
+}
+
+func TestSearchCategoriesNoMatch(t *testing.T) {
+	idx := NewIndex(testProducts())
+	results := idx.SearchCategories("zzz")
+	if len(results) != 0 {
+		t.Errorf("expected no category results for 'zzz', got %v", results)
+	}
+}
+
+func TestProductsByCategory(t *testing.T) {
+	idx := NewIndex(testProducts())
+	ids := idx.ProductsByCategory("beer")
+	if len(ids) != 2 {
+		t.Errorf("expected 2 beer products, got %d", len(ids))
+	}
+}

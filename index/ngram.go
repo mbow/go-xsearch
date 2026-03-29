@@ -2,6 +2,7 @@ package index
 
 import (
 	"search/catalog"
+	"sort"
 	"strings"
 )
 
@@ -28,17 +29,21 @@ type SearchResult struct {
 
 // Index is an n-gram inverted index over a product catalog.
 type Index struct {
-	products []catalog.Product
-	posting  map[string][]int            // trigram -> list of product IDs
-	trigrams map[int]map[string]struct{} // product ID -> set of its trigrams
+	products    []catalog.Product
+	posting     map[string][]int            // trigram -> list of product IDs
+	trigrams    map[int]map[string]struct{} // product ID -> set of its trigrams
+	catTrigrams map[string]map[string]struct{} // category name -> set of its trigrams
+	catProducts map[string][]int               // category name -> list of product IDs
 }
 
 // NewIndex builds an n-gram inverted index from the given products.
 func NewIndex(products []catalog.Product) *Index {
 	idx := &Index{
-		products: products,
-		posting:  make(map[string][]int),
-		trigrams: make(map[int]map[string]struct{}),
+		products:    products,
+		posting:     make(map[string][]int),
+		trigrams:    make(map[int]map[string]struct{}),
+		catTrigrams: make(map[string]map[string]struct{}),
+		catProducts: make(map[string][]int),
 	}
 
 	for id, p := range products {
@@ -47,6 +52,16 @@ func NewIndex(products []catalog.Product) *Index {
 		for _, g := range grams {
 			idx.trigrams[id][g] = struct{}{}
 			idx.posting[g] = append(idx.posting[g], id)
+		}
+		idx.catProducts[p.Category] = append(idx.catProducts[p.Category], id)
+	}
+
+	// Build category trigrams
+	for cat := range idx.catProducts {
+		grams := ExtractTrigrams(cat)
+		idx.catTrigrams[cat] = make(map[string]struct{}, len(grams))
+		for _, g := range grams {
+			idx.catTrigrams[cat][g] = struct{}{}
 		}
 	}
 
@@ -118,4 +133,68 @@ func (idx *Index) prefixSearch(query string) []SearchResult {
 		}
 	}
 	return results
+}
+
+// SearchCategories returns category names that match the query,
+// ranked by Jaccard similarity of their trigrams. Only returns
+// categories with a score above 0.
+func (idx *Index) SearchCategories(query string) []string {
+	query = strings.ToLower(strings.TrimSpace(query))
+	if query == "" {
+		return nil
+	}
+
+	queryGrams := ExtractTrigrams(query)
+	// For short queries, prefix match on category names
+	if len(queryGrams) == 0 {
+		var matches []string
+		for cat := range idx.catProducts {
+			if strings.HasPrefix(cat, query) {
+				matches = append(matches, cat)
+			}
+		}
+		return matches
+	}
+
+	querySet := make(map[string]struct{}, len(queryGrams))
+	for _, g := range queryGrams {
+		querySet[g] = struct{}{}
+	}
+
+	type scored struct {
+		name  string
+		score float64
+	}
+	var results []scored
+
+	for cat, catGrams := range idx.catTrigrams {
+		intersection := 0
+		for g := range querySet {
+			if _, ok := catGrams[g]; ok {
+				intersection++
+			}
+		}
+		if intersection == 0 {
+			continue
+		}
+		unionSize := len(querySet) + len(catGrams) - intersection
+		score := float64(intersection) / float64(unionSize)
+		results = append(results, scored{name: cat, score: score})
+	}
+
+	// Sort by score descending
+	sort.Slice(results, func(i, j int) bool {
+		return results[i].score > results[j].score
+	})
+
+	names := make([]string, len(results))
+	for i, r := range results {
+		names[i] = r.name
+	}
+	return names
+}
+
+// ProductsByCategory returns product IDs belonging to the given category.
+func (idx *Index) ProductsByCategory(category string) []int {
+	return idx.catProducts[category]
 }
