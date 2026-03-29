@@ -22,3 +22,55 @@ func djb2(s string) uint64 {
 	}
 	return h
 }
+
+// Filter is a Bloom filter backed by a bit array.
+type Filter struct {
+	bits []uint64
+	size uint64
+	k    int
+}
+
+// New creates a Bloom filter with the given number of bits and hash count.
+func New(numBits uint64, k int) *Filter {
+	// Round up to multiple of 64
+	words := (numBits + 63) / 64
+	return &Filter{
+		bits: make([]uint64, words),
+		size: words * 64,
+		k:    k,
+	}
+}
+
+// hashes returns k bit positions for the given item using double hashing.
+func (f *Filter) hashes(item string) []uint64 {
+	h1 := fnv1a(item)
+	h2 := djb2(item)
+	positions := make([]uint64, f.k)
+	for i := 0; i < f.k; i++ {
+		positions[i] = (h1 + uint64(i)*h2) % f.size
+	}
+	return positions
+}
+
+// Add inserts an item into the Bloom filter.
+func (f *Filter) Add(item string) {
+	for _, pos := range f.hashes(item) {
+		word := pos / 64
+		bit := pos % 64
+		f.bits[word] |= 1 << bit
+	}
+}
+
+// MayContain checks if an item might be in the filter.
+// Returns false if the item is definitely not in the set.
+// Returns true if the item might be in the set (possible false positive).
+func (f *Filter) MayContain(item string) bool {
+	for _, pos := range f.hashes(item) {
+		word := pos / 64
+		bit := pos % 64
+		if f.bits[word]&(1<<bit) == 0 {
+			return false
+		}
+	}
+	return true
+}
