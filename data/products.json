@@ -1,0 +1,22 @@
+[
+  {"name": "Budweiser", "category": "beer"},
+  {"name": "Miller Lite", "category": "beer"},
+  {"name": "Coors Light", "category": "beer"},
+  {"name": "Heineken", "category": "beer"},
+  {"name": "Corona Extra", "category": "beer"},
+  {"name": "Nike Air Max", "category": "shoes"},
+  {"name": "Nike Dunk Low", "category": "shoes"},
+  {"name": "Adidas Superstar", "category": "shoes"},
+  {"name": "New Balance 574", "category": "shoes"},
+  {"name": "Converse Chuck Taylor", "category": "shoes"},
+  {"name": "Samsung Galaxy S24", "category": "phone"},
+  {"name": "iPhone 16 Pro", "category": "phone"},
+  {"name": "Google Pixel 9", "category": "phone"},
+  {"name": "Sony WH-1000XM5", "category": "headphones"},
+  {"name": "AirPods Pro", "category": "headphones"},
+  {"name": "Bose QuietComfort", "category": "headphones"},
+  {"name": "Coca-Cola", "category": "soda"},
+  {"name": "Pepsi", "category": "soda"},
+  {"name": "Sprite", "category": "soda"},
+  {"name": "Mountain Dew", "category": "soda"}
+]
