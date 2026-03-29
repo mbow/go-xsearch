@@ -2,6 +2,8 @@ package ranking
 
 import (
 	"math"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -98,5 +100,65 @@ func TestCombinedScoreZeroPopularity(t *testing.T) {
 	expected := 0.6 * 0.8
 	if math.Abs(score-expected) > 0.01 {
 		t.Errorf("expected %f, got %f", expected, score)
+	}
+}
+
+func TestSaveAndLoad(t *testing.T) {
+	r := New(0.05, 0.6)
+	now := time.Now()
+	r.SetSelections(1, []time.Time{now, now.Add(-24 * time.Hour)})
+	r.SetSelections(5, []time.Time{now.Add(-48 * time.Hour)})
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "popularity.json")
+
+	if err := r.Save(path); err != nil {
+		t.Fatalf("Save() error: %v", err)
+	}
+
+	// Verify file was created
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("expected file to exist: %v", err)
+	}
+
+	r2 := New(0.05, 0.6)
+	if err := r2.Load(path); err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+
+	r2.mu.RLock()
+	defer r2.mu.RUnlock()
+
+	if len(r2.selections[1]) != 2 {
+		t.Errorf("expected 2 selections for product 1, got %d", len(r2.selections[1]))
+	}
+	if len(r2.selections[5]) != 1 {
+		t.Errorf("expected 1 selection for product 5, got %d", len(r2.selections[5]))
+	}
+}
+
+func TestLoadNonexistent(t *testing.T) {
+	r := New(0.05, 0.6)
+	err := r.Load("/nonexistent/path.json")
+	// Should not error — missing file means no prior data
+	if err != nil {
+		t.Errorf("Load() should not error for missing file, got: %v", err)
+	}
+}
+
+func TestPrune(t *testing.T) {
+	r := New(0.05, 0.6)
+	now := time.Now()
+	r.SetSelections(1, []time.Time{
+		now,
+		now.Add(-91 * 24 * time.Hour), // older than 90 days
+	})
+
+	r.Prune(90)
+
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if len(r.selections[1]) != 1 {
+		t.Errorf("expected 1 selection after prune, got %d", len(r.selections[1]))
 	}
 }
