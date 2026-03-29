@@ -85,3 +85,10 @@ func (r *Ranker) NormalizedPopularity(productID int) float64 {
 	}
 	return score / maxScore
 }
+
+// CombinedScore computes the final ranking score by fusing relevance and popularity.
+// relevance should be in the 0.0-1.0 range (Jaccard similarity).
+func (r *Ranker) CombinedScore(productID int, relevance float64) float64 {
+	pop := r.NormalizedPopularity(productID)
+	return r.alpha*relevance + (1-r.alpha)*pop
+}

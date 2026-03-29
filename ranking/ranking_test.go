@@ -73,3 +73,30 @@ func TestNormalizedPopularityNoSelections(t *testing.T) {
 		t.Errorf("expected 0 when no selections exist, got %f", norm)
 	}
 }
+
+func TestCombinedScore(t *testing.T) {
+	r := New(0.05, 0.6)
+	now := time.Now()
+	r.SetSelections(1, []time.Time{now, now, now})
+	r.SetSelections(2, []time.Time{now})
+
+	// Product 1: high popularity, low relevance
+	score1 := r.CombinedScore(1, 0.3)
+	// Product 2: low popularity, high relevance
+	score2 := r.CombinedScore(2, 0.9)
+
+	// With alpha=0.6, relevance dominates, so product 2 should win
+	if score2 <= score1 {
+		t.Errorf("high relevance should beat high popularity at alpha=0.6: score1=%f, score2=%f", score1, score2)
+	}
+}
+
+func TestCombinedScoreZeroPopularity(t *testing.T) {
+	r := New(0.05, 0.6)
+	score := r.CombinedScore(99, 0.8)
+	// With no popularity data, score = alpha * relevance = 0.6 * 0.8 = 0.48
+	expected := 0.6 * 0.8
+	if math.Abs(score-expected) > 0.01 {
+		t.Errorf("expected %f, got %f", expected, score)
+	}
+}
