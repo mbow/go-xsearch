@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"html/template"
@@ -9,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"sync"
 	"time"
 
 	"search/catalog"
@@ -21,6 +23,7 @@ type App struct {
 	indexTmpl  *template.Template
 	resultTmpl *template.Template
 	dataDir    string
+	cache      *fragmentCache
 }
 
 // ResultsData is the template data for search results.
@@ -28,6 +31,45 @@ type ResultsData struct {
 	Query           string
 	DirectResults   []engine.Result
 	FallbackResults []engine.Result
+}
+
+// fragmentCache is a simple LRU cache for rendered HTML fragments.
+// Keyed by query string, invalidated when selections change popularity.
+type fragmentCache struct {
+	mu      sync.RWMutex
+	entries map[string][]byte
+	maxSize int
+}
+
+func newFragmentCache(maxSize int) *fragmentCache {
+	return &fragmentCache{
+		entries: make(map[string][]byte, maxSize),
+		maxSize: maxSize,
+	}
+}
+
+func (c *fragmentCache) get(key string) ([]byte, bool) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	v, ok := c.entries[key]
+	return v, ok
+}
+
+func (c *fragmentCache) set(key string, value []byte) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	// Simple eviction: if at capacity, clear everything.
+	// For a product catalog with debounced queries, this rarely triggers.
+	if len(c.entries) >= c.maxSize {
+		c.entries = make(map[string][]byte, c.maxSize)
+	}
+	c.entries[key] = value
+}
+
+func (c *fragmentCache) invalidate() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.entries = make(map[string][]byte, c.maxSize)
 }
 
 func (app *App) loadTemplates() {
@@ -41,6 +83,15 @@ func (app *App) handleIndex(w http.ResponseWriter, r *http.Request) {
 
 func (app *App) handleSearch(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query().Get("q")
+
+	// Check fragment cache first
+	if cached, ok := app.cache.get(query); ok {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("X-Cache", "HIT")
+		w.Write(cached)
+		return
+	}
+
 	results := app.engine.Search(query)
 
 	data := ResultsData{Query: query}
@@ -52,7 +103,17 @@ func (app *App) handleSearch(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	app.resultTmpl.Execute(w, data)
+	// Render to buffer so we can cache it
+	var buf bytes.Buffer
+	app.resultTmpl.Execute(&buf, data)
+	rendered := buf.Bytes()
+
+	// Cache the rendered fragment
+	app.cache.set(query, rendered)
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("X-Cache", "MISS")
+	w.Write(rendered)
 }
 
 func (app *App) handleSelect(w http.ResponseWriter, r *http.Request) {
@@ -71,6 +132,8 @@ func (app *App) handleSelect(w http.ResponseWriter, r *http.Request) {
 	}
 
 	app.engine.RecordSelection(id)
+	// Invalidate cache since popularity changed, affecting result ordering
+	app.cache.invalidate()
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -99,6 +162,7 @@ func main() {
 	app := &App{
 		engine:  engine.New(products),
 		dataDir: dataDir,
+		cache:   newFragmentCache(1024),
 	}
 	app.loadTemplates()
 

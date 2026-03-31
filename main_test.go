@@ -20,7 +20,7 @@ func testEngine() *engine.Engine {
 }
 
 func TestHandleIndex(t *testing.T) {
-	app := &App{engine: testEngine()}
+	app := &App{engine: testEngine(), cache: newFragmentCache(64)}
 	app.loadTemplates()
 
 	req := httptest.NewRequest("GET", "/", nil)
@@ -40,7 +40,7 @@ func TestHandleIndex(t *testing.T) {
 }
 
 func TestHandleSearch(t *testing.T) {
-	app := &App{engine: testEngine()}
+	app := &App{engine: testEngine(), cache: newFragmentCache(64)}
 	app.loadTemplates()
 
 	req := httptest.NewRequest("GET", "/search?q=nik", nil)
@@ -57,7 +57,7 @@ func TestHandleSearch(t *testing.T) {
 }
 
 func TestHandleSearchEmpty(t *testing.T) {
-	app := &App{engine: testEngine()}
+	app := &App{engine: testEngine(), cache: newFragmentCache(64)}
 	app.loadTemplates()
 
 	req := httptest.NewRequest("GET", "/search?q=", nil)
@@ -70,7 +70,7 @@ func TestHandleSearchEmpty(t *testing.T) {
 }
 
 func TestHandleSelect(t *testing.T) {
-	app := &App{engine: testEngine()}
+	app := &App{engine: testEngine(), cache: newFragmentCache(64)}
 
 	body := strings.NewReader(`{"id": "0"}`)
 	req := httptest.NewRequest("POST", "/select", body)
@@ -84,7 +84,7 @@ func TestHandleSelect(t *testing.T) {
 }
 
 func TestHandleSelectInvalidID(t *testing.T) {
-	app := &App{engine: testEngine()}
+	app := &App{engine: testEngine(), cache: newFragmentCache(64)}
 
 	body := strings.NewReader(`{"id": "abc"}`)
 	req := httptest.NewRequest("POST", "/select", body)
