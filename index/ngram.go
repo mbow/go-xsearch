@@ -1,23 +1,31 @@
+// Package index implements an n-gram inverted index for fuzzy, prefix,
+// and substring matching over a product catalog.
+//
+// Products are tokenized into overlapping character trigrams (3-grams).
+// Queries are scored against candidates using Jaccard similarity of their
+// trigram sets. For short queries (1-2 characters), a linear prefix scan
+// is used instead.
 package index
 
 import (
+	"cmp"
+	"maps"
 	"search/catalog"
 	"slices"
-	"sort"
 	"strings"
 	"sync"
 )
 
 // ExtractTrigrams returns all overlapping 3-character substrings
 // from the normalized (lowercased, trimmed) input.
-// Returns nil if input has fewer than 3 characters after normalization.
+// Returns nil if the input has fewer than 3 characters after normalization.
 func ExtractTrigrams(s string) []string {
 	s = strings.ToLower(strings.TrimSpace(s))
 	if len(s) < 3 {
 		return nil
 	}
 	trigrams := make([]string, 0, len(s)-2)
-	for i := 0; i <= len(s)-3; i++ {
+	for i := range len(s) - 2 {
 		trigrams = append(trigrams, s[i:i+3])
 	}
 	return trigrams
@@ -29,83 +37,34 @@ type SearchResult struct {
 	Score     float64
 }
 
-// bitset is a compact set of product IDs backed by a uint64 slice.
-// Set/test operations are single CPU instructions instead of map hash+lookup.
-type bitset struct {
-	words []uint64
-	size  int
-}
-
-func newBitset(n int) bitset {
-	return bitset{
-		words: make([]uint64, (n+63)/64),
-		size:  n,
-	}
-}
-
-func (b *bitset) set(i int)      { b.words[i/64] |= 1 << (uint(i) % 64) }
-func (b *bitset) test(i int) bool { return b.words[i/64]&(1<<(uint(i)%64)) != 0 }
-
-// forEach calls fn for each set bit.
-func (b *bitset) forEach(fn func(int)) {
-	for w := range b.words {
-		bits := b.words[w]
-		base := w * 64
-		for bits != 0 {
-			tz := bits & -bits       // isolate lowest set bit
-			pos := base + popcount64minus1(tz)
-			fn(pos)
-			bits &= bits - 1 // clear lowest set bit
-		}
-	}
-}
-
-// popcount64minus1 returns the bit position of a single set bit (power of 2).
-func popcount64minus1(v uint64) int {
-	// de Bruijn sequence for bit position lookup
-	pos := 0
-	for v >>= 1; v != 0; v >>= 1 {
-		pos++
-	}
-	return pos
-}
-
 // Index is an n-gram inverted index over a product catalog.
 type Index struct {
 	products    []catalog.Product
-	posting     map[string][]int            // trigram -> list of product IDs
-	trigrams    map[int]map[string]struct{} // product ID -> set of its trigrams
-	catTrigrams map[string]map[string]struct{} // category name -> set of its trigrams
-	catProducts map[string][]int               // category name -> list of product IDs
-	hitsPool    sync.Pool                      // reusable []int16 hit counters
+	posting     map[string][]int              // trigram → product IDs
+	trigrams    map[int]map[string]struct{}   // product ID → its trigram set
+	catTrigrams map[string]map[string]struct{} // category → its trigram set
+	catProducts map[string][]int              // category → product IDs
+	hitsPool    sync.Pool                     // reusable []int16 hit counters
 }
 
-// Snapshot holds the serializable state of an index.
+// Snapshot holds the serializable state of an [Index].
 type Snapshot struct {
-	Posting     map[string][]int            `cbor:"posting"`
-	Trigrams    map[int][]string            `cbor:"trigrams"`     // flattened from map[int]map[string]struct{}
-	CatTrigrams map[string][]string         `cbor:"cat_trigrams"` // flattened
-	CatProducts map[string][]int            `cbor:"cat_products"`
+	Posting     map[string][]int    `cbor:"posting"`
+	Trigrams    map[int][]string    `cbor:"trigrams"`
+	CatTrigrams map[string][]string `cbor:"cat_trigrams"`
+	CatProducts map[string][]int   `cbor:"cat_products"`
 }
 
 // ToSnapshot exports the index state for serialization.
 func (idx *Index) ToSnapshot() Snapshot {
 	tris := make(map[int][]string, len(idx.trigrams))
 	for id, grams := range idx.trigrams {
-		s := make([]string, 0, len(grams))
-		for g := range grams {
-			s = append(s, g)
-		}
-		tris[id] = s
+		tris[id] = slices.Collect(maps.Keys(grams))
 	}
 
 	catTris := make(map[string][]string, len(idx.catTrigrams))
 	for cat, grams := range idx.catTrigrams {
-		s := make([]string, 0, len(grams))
-		for g := range grams {
-			s = append(s, g)
-		}
-		catTris[cat] = s
+		catTris[cat] = slices.Collect(maps.Keys(grams))
 	}
 
 	return Snapshot{
@@ -116,7 +75,7 @@ func (idx *Index) ToSnapshot() Snapshot {
 	}
 }
 
-// FromSnapshot restores an index from serialized state plus the product list.
+// FromSnapshot restores an [Index] from a serialized [Snapshot] and product list.
 func FromSnapshot(s Snapshot, products []catalog.Product) *Index {
 	trigrams := make(map[int]map[string]struct{}, len(s.Trigrams))
 	for id, grams := range s.Trigrams {
@@ -148,6 +107,8 @@ func FromSnapshot(s Snapshot, products []catalog.Product) *Index {
 }
 
 // NewIndex builds an n-gram inverted index from the given products.
+// Each product's name and tags are tokenized into trigrams and added
+// to the inverted posting lists.
 func NewIndex(products []catalog.Product) *Index {
 	n := len(products)
 	idx := &Index{
@@ -161,7 +122,6 @@ func NewIndex(products []catalog.Product) *Index {
 
 	for id, p := range products {
 		grams := ExtractTrigrams(p.Name)
-		// Also index tags — each tag's trigrams become searchable
 		for _, tag := range p.Tags {
 			grams = append(grams, ExtractTrigrams(tag)...)
 		}
@@ -173,7 +133,6 @@ func NewIndex(products []catalog.Product) *Index {
 		idx.catProducts[p.Category] = append(idx.catProducts[p.Category], id)
 	}
 
-	// Build category trigrams
 	for cat := range idx.catProducts {
 		grams := ExtractTrigrams(cat)
 		idx.catTrigrams[cat] = make(map[string]struct{}, len(grams))
@@ -185,15 +144,18 @@ func NewIndex(products []catalog.Product) *Index {
 	return idx
 }
 
-// Search returns products matching the query, scored by Jaccard similarity.
-// For queries shorter than 3 characters, falls back to prefix matching.
+// Search returns products matching query, scored by Jaccard similarity.
+// For queries shorter than 3 characters, it falls back to prefix matching.
+//
+// The algorithm processes trigrams from rarest to most common posting list,
+// caps candidates at [maxCandidates], and only scores those with enough
+// trigram overlap to avoid wasted work on large catalogs.
 func (idx *Index) Search(query string) []SearchResult {
 	query = strings.ToLower(strings.TrimSpace(query))
 	if query == "" {
 		return nil
 	}
 
-	// Short query: prefix fallback
 	if len(query) < 3 {
 		return idx.prefixSearch(query)
 	}
@@ -203,7 +165,7 @@ func (idx *Index) Search(query string) []SearchResult {
 		return nil
 	}
 
-	// Build set of unique query trigrams
+	// Deduplicate query trigrams.
 	querySet := make(map[string]struct{}, len(queryGrams))
 	for _, g := range queryGrams {
 		querySet[g] = struct{}{}
@@ -211,8 +173,6 @@ func (idx *Index) Search(query string) []SearchResult {
 	numQueryGrams := len(querySet)
 
 	// Sort query trigrams by posting list size (rarest first).
-	// This dramatically reduces work: we seed candidates from the smallest
-	// posting list, then only check those candidates against larger lists.
 	type gramEntry struct {
 		gram string
 		size int
@@ -222,23 +182,25 @@ func (idx *Index) Search(query string) []SearchResult {
 		sorted = append(sorted, gramEntry{g, len(idx.posting[g])})
 	}
 	slices.SortFunc(sorted, func(a, b gramEntry) int {
-		return a.size - b.size
+		return cmp.Compare(a.size, b.size)
 	})
 
-	// Count trigram hits per candidate product using pooled array.
+	// Count trigram hits per candidate using a pooled array.
 	hitsPtr := idx.hitsPool.Get().(*[]int16)
 	hits := *hitsPtr
-	// Seed candidates from the rarest trigram, then expand only from
-	// small posting lists. Large posting lists only update existing candidates.
-	const maxPostingExpand = 200 // only add new candidates from small posting lists
-	const maxCandidates = 500   // stop expanding candidates after this many
+
+	const (
+		maxPostingExpand = 200 // only add new candidates from small posting lists
+		maxCandidates    = 500 // stop expanding after this many candidates
+	)
+
 	var touched []int
 	for _, id := range idx.posting[sorted[0].gram] {
 		hits[id]++
 		touched = append(touched, id)
 	}
-	for i := 1; i < len(sorted); i++ {
-		posting := idx.posting[sorted[i].gram]
+	for _, entry := range sorted[1:] {
+		posting := idx.posting[entry.gram]
 		expand := len(posting) <= maxPostingExpand && len(touched) < maxCandidates
 		for _, id := range posting {
 			if hits[id] > 0 {
@@ -250,30 +212,25 @@ func (idx *Index) Search(query string) []SearchResult {
 		}
 	}
 
-	// Minimum hit threshold: at least 1/3 of query trigrams must match.
-	// This filters out noise from common trigrams at scale.
-	minHits := int16(1)
-	if numQueryGrams > 3 {
-		minHits = int16(numQueryGrams / 3)
-	}
+	// Minimum hit threshold: require ≥ 1/3 of query trigrams to match.
+	minHits := int16(max(1, numQueryGrams/3))
 
-	// Score only candidates that pass the hit threshold
+	// Score candidates that pass the threshold.
 	var results []SearchResult
 	for _, id := range touched {
 		h := hits[id]
 		if h < minHits {
 			continue
 		}
-		productGrams := idx.trigrams[id]
-
 		intersection := int(h)
-		unionSize := numQueryGrams + len(productGrams) - intersection
-
-		score := float64(intersection) / float64(unionSize)
-		results = append(results, SearchResult{ProductID: id, Score: score})
+		unionSize := numQueryGrams + len(idx.trigrams[id]) - intersection
+		results = append(results, SearchResult{
+			ProductID: id,
+			Score:     float64(intersection) / float64(unionSize),
+		})
 	}
 
-	// Clear only touched entries and return to pool
+	// Clear touched entries and return the hit array to the pool.
 	for _, id := range touched {
 		hits[id] = 0
 	}
@@ -282,7 +239,7 @@ func (idx *Index) Search(query string) []SearchResult {
 	return results
 }
 
-// prefixSearch does a linear scan for products whose lowercase name
+// prefixSearch does a linear scan for products whose lowercased name
 // starts with the given short query.
 func (idx *Index) prefixSearch(query string) []SearchResult {
 	var results []SearchResult
@@ -294,9 +251,9 @@ func (idx *Index) prefixSearch(query string) []SearchResult {
 	return results
 }
 
-// SearchCategories returns category names that match the query,
-// ranked by Jaccard similarity of their trigrams. Only returns
-// categories with a score above 0.
+// SearchCategories returns category names matching query, ranked by
+// Jaccard similarity of their trigrams. Only categories with a positive
+// score are returned.
 func (idx *Index) SearchCategories(query string) []string {
 	query = strings.ToLower(strings.TrimSpace(query))
 	if query == "" {
@@ -304,7 +261,6 @@ func (idx *Index) SearchCategories(query string) []string {
 	}
 
 	queryGrams := ExtractTrigrams(query)
-	// For short queries, prefix match on category names
 	if len(queryGrams) == 0 {
 		var matches []string
 		for cat := range idx.catProducts {
@@ -337,13 +293,14 @@ func (idx *Index) SearchCategories(query string) []string {
 			continue
 		}
 		unionSize := len(querySet) + len(catGrams) - intersection
-		score := float64(intersection) / float64(unionSize)
-		results = append(results, scored{name: cat, score: score})
+		results = append(results, scored{
+			name:  cat,
+			score: float64(intersection) / float64(unionSize),
+		})
 	}
 
-	// Sort by score descending
-	sort.Slice(results, func(i, j int) bool {
-		return results[i].score > results[j].score
+	slices.SortFunc(results, func(a, b scored) int {
+		return cmp.Compare(b.score, a.score) // descending
 	})
 
 	names := make([]string, len(results))
@@ -353,7 +310,13 @@ func (idx *Index) SearchCategories(query string) []string {
 	return names
 }
 
-// ProductsByCategory returns product IDs belonging to the given category.
+// ProductsByCategory returns the product IDs belonging to the given category.
 func (idx *Index) ProductsByCategory(category string) []int {
 	return idx.catProducts[category]
+}
+
+// CategoryNames returns the category-to-product-IDs map, allowing callers
+// to iterate category names without copying.
+func (idx *Index) CategoryNames() map[string][]int {
+	return idx.catProducts
 }

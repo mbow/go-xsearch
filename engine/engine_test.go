@@ -101,7 +101,7 @@ func TestSearchRecordAndRank(t *testing.T) {
 	e := New(testProducts())
 
 	// Select Nike Dunk Low several times
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		e.RecordSelection(4) // Nike Dunk Low
 	}
 

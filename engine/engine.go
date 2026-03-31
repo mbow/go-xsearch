@@ -1,8 +1,12 @@
+// Package engine orchestrates the search pipeline: Bloom filter fast rejection,
+// n-gram index lookup with Jaccard scoring, category fallback, and popularity
+// ranking with exponential time decay.
 package engine
 
 import (
 	"cmp"
 	"fmt"
+	"maps"
 	"search/bloom"
 	"search/catalog"
 	"search/index"
@@ -377,13 +381,5 @@ func (e *Engine) rebuildCategoryCache() {
 
 // allCategories returns all unique category names.
 func (e *Engine) allCategories() []string {
-	seen := make(map[string]struct{})
-	var cats []string
-	for _, p := range e.products {
-		if _, ok := seen[p.Category]; !ok {
-			seen[p.Category] = struct{}{}
-			cats = append(cats, p.Category)
-		}
-	}
-	return cats
+	return slices.Collect(maps.Keys(e.index.CategoryNames()))
 }

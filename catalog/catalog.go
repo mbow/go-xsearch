@@ -1,7 +1,12 @@
+// Package catalog defines the product data model and provides loading functions.
+//
+// Products can be loaded from JSON files at runtime via [LoadProducts], or from
+// compile-time embedded CBOR data via [EmbeddedProducts] (see embed.go).
 package catalog
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 )
 
@@ -12,17 +17,16 @@ type Product struct {
 	Tags     []string `json:"tags,omitempty" cbor:"tags,omitempty"`
 }
 
-// LoadProducts reads a JSON file and returns a slice of products.
-// Kept for testing and as a fallback when CBOR data is not generated.
+// LoadProducts reads a JSON file at path and returns the parsed products.
 func LoadProducts(path string) ([]Product, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("reading %s: %w", path, err)
 	}
 
 	var products []Product
 	if err := json.Unmarshal(data, &products); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("parsing JSON: %w", err)
 	}
 
 	return products, nil

@@ -1,3 +1,12 @@
+// Package ranking implements time-decayed popularity scoring for search results.
+//
+// Each product's popularity is computed as the sum of exponentially decayed
+// selection timestamps: score = Σ e^(-λ × age_in_days). This naturally handles
+// both frequency (more selections = higher sum) and recency (older selections
+// contribute less).
+//
+// The [Ranker.Scorer] method returns a closure that captures a single time.Now()
+// and lock acquisition for an entire search operation, avoiding per-result overhead.
 package ranking
 
 import (

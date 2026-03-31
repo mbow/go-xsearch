@@ -17,7 +17,7 @@ import (
 var rawCBOR []byte
 
 // payload is the full serialized dataset from the generator.
-// BloomRaw and IndexRaw are kept as raw CBOR bytes to avoid importing
+// BloomRaw and IndexRaw are kept as [cbor.RawMessage] to avoid importing
 // bloom/index packages (which would create an import cycle).
 type payload struct {
 	Products []Product       `cbor:"products"`
@@ -40,18 +40,18 @@ func initEmbedded() {
 			return
 		}
 
-		// Decompress gzip
 		gzReader, err := gzip.NewReader(bytes.NewReader(rawCBOR))
 		if err != nil {
 			initErr = fmt.Errorf("catalog: decompressing gzip: %w", err)
 			return
 		}
+		defer gzReader.Close()
+
 		cborData, err := io.ReadAll(gzReader)
 		if err != nil {
 			initErr = fmt.Errorf("catalog: reading gzip: %w", err)
 			return
 		}
-		gzReader.Close()
 
 		if err := cbor.Unmarshal(cborData, &decoded); err != nil {
 			initErr = fmt.Errorf("catalog: unmarshaling CBOR: %w", err)
@@ -67,60 +67,47 @@ func initEmbedded() {
 	})
 }
 
-// EmbeddedProducts returns all products from the compiled-in CBOR data.
+// EmbeddedProducts returns all products from the compile-time embedded CBOR data.
+// The first call decompresses and unmarshals; subsequent calls return cached data.
 func EmbeddedProducts() ([]Product, error) {
 	initEmbedded()
-	if initErr != nil {
-		return nil, initErr
-	}
-	return decoded.Products, nil
+	return decoded.Products, initErr
 }
 
 // EmbeddedBloomRaw returns the raw CBOR bytes of the pre-built Bloom filter snapshot.
-// The caller (engine) unmarshals this into bloom.Snapshot.
+// The caller (typically [engine.NewFromEmbedded]) unmarshals this into [bloom.Snapshot].
 func EmbeddedBloomRaw() ([]byte, error) {
 	initEmbedded()
-	if initErr != nil {
-		return nil, initErr
-	}
-	return []byte(decoded.BloomRaw), nil
+	return []byte(decoded.BloomRaw), initErr
 }
 
 // EmbeddedIndexRaw returns the raw CBOR bytes of the pre-built n-gram index snapshot.
-// The caller (engine) unmarshals this into index.Snapshot.
+// The caller (typically [engine.NewFromEmbedded]) unmarshals this into [index.Snapshot].
 func EmbeddedIndexRaw() ([]byte, error) {
 	initEmbedded()
-	if initErr != nil {
-		return nil, initErr
-	}
-	return []byte(decoded.IndexRaw), nil
+	return []byte(decoded.IndexRaw), initErr
 }
 
-// GetByName looks up a product by exact name. Returns nil if not found.
+// GetByName looks up a product by exact name. Returns nil, nil if not found.
 func GetByName(name string) (*Product, error) {
 	initEmbedded()
 	if initErr != nil {
 		return nil, initErr
 	}
-	p := productsByName[name]
-	return p, nil
+	return productsByName[name], nil
 }
 
-// GetByID looks up a product by its index position. Returns nil if not found.
+// GetByID looks up a product by its index position. Returns nil, nil if not found.
 func GetByID(id int) (*Product, error) {
 	initEmbedded()
 	if initErr != nil {
 		return nil, initErr
 	}
-	p := productsByID[id]
-	return p, nil
+	return productsByID[id], nil
 }
 
 // EmbeddedCount returns the number of embedded products.
 func EmbeddedCount() (int, error) {
 	initEmbedded()
-	if initErr != nil {
-		return 0, initErr
-	}
-	return len(decoded.Products), nil
+	return len(decoded.Products), initErr
 }

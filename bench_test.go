@@ -13,7 +13,6 @@ import (
 	"search/ranking"
 )
 
-// Shared setup — uses the full 226-product embedded catalog
 func benchProducts(b *testing.B) []catalog.Product {
 	b.Helper()
 	products, err := catalog.EmbeddedProducts()
@@ -49,7 +48,7 @@ func BenchmarkBloomMayContain(b *testing.B) {
 	bf.Add("udw")
 	bf.Add("dwe")
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		bf.MayContain("bud")
 	}
 }
@@ -58,7 +57,7 @@ func BenchmarkBloomMiss(b *testing.B) {
 	bf := bloom.New(20000, 3)
 	bf.Add("bud")
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		bf.MayContain("zzz")
 	}
 }
@@ -66,19 +65,19 @@ func BenchmarkBloomMiss(b *testing.B) {
 // --- Trigram extraction benchmarks ---
 
 func BenchmarkExtractTrigrams_Short(b *testing.B) {
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		index.ExtractTrigrams("bud")
 	}
 }
 
 func BenchmarkExtractTrigrams_Medium(b *testing.B) {
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		index.ExtractTrigrams("budweiser")
 	}
 }
 
 func BenchmarkExtractTrigrams_Long(b *testing.B) {
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		index.ExtractTrigrams("weihenstephaner hefeweissbier")
 	}
 }
@@ -89,7 +88,7 @@ func BenchmarkIndexSearch_Prefix(b *testing.B) {
 	products := benchProducts(b)
 	idx := index.NewIndex(products)
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		idx.Search("nik")
 	}
 }
@@ -98,7 +97,7 @@ func BenchmarkIndexSearch_Fuzzy(b *testing.B) {
 	products := benchProducts(b)
 	idx := index.NewIndex(products)
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		idx.Search("budwiser")
 	}
 }
@@ -107,7 +106,7 @@ func BenchmarkIndexSearch_Exact(b *testing.B) {
 	products := benchProducts(b)
 	idx := index.NewIndex(products)
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		idx.Search("budweiser")
 	}
 }
@@ -116,7 +115,7 @@ func BenchmarkIndexSearch_ShortQuery(b *testing.B) {
 	products := benchProducts(b)
 	idx := index.NewIndex(products)
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		idx.Search("b")
 	}
 }
@@ -125,7 +124,7 @@ func BenchmarkIndexSearchCategories(b *testing.B) {
 	products := benchProducts(b)
 	idx := index.NewIndex(products)
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		idx.SearchCategories("beer")
 	}
 }
@@ -134,12 +133,11 @@ func BenchmarkIndexSearchCategories(b *testing.B) {
 
 func BenchmarkRankingCombinedScore(b *testing.B) {
 	r := ranking.New(0.05, 0.6)
-	// Simulate some selections
-	for i := 0; i < 50; i++ {
-		r.RecordSelection(i % 10)
+	for range 50 {
+		r.RecordSelection(0)
 	}
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		r.CombinedScore(0, 0.8)
 	}
 }
@@ -147,7 +145,7 @@ func BenchmarkRankingCombinedScore(b *testing.B) {
 func BenchmarkRankingCombinedScore_NoSelections(b *testing.B) {
 	r := ranking.New(0.05, 0.6)
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		r.CombinedScore(0, 0.8)
 	}
 }
@@ -157,7 +155,7 @@ func BenchmarkRankingCombinedScore_NoSelections(b *testing.B) {
 func BenchmarkEngineSearch_Prefix3Char(b *testing.B) {
 	e := benchEngine(b)
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		e.Search("nik")
 	}
 }
@@ -165,7 +163,7 @@ func BenchmarkEngineSearch_Prefix3Char(b *testing.B) {
 func BenchmarkEngineSearch_Fuzzy(b *testing.B) {
 	e := benchEngine(b)
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		e.Search("budwiser")
 	}
 }
@@ -173,7 +171,7 @@ func BenchmarkEngineSearch_Fuzzy(b *testing.B) {
 func BenchmarkEngineSearch_CachedPrefix(b *testing.B) {
 	e := benchEngine(b)
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		e.Search("b")
 	}
 }
@@ -181,7 +179,7 @@ func BenchmarkEngineSearch_CachedPrefix(b *testing.B) {
 func BenchmarkEngineSearch_CategoryFallback(b *testing.B) {
 	e := benchEngine(b)
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		e.Search("beer")
 	}
 }
@@ -189,18 +187,18 @@ func BenchmarkEngineSearch_CategoryFallback(b *testing.B) {
 func BenchmarkEngineSearch_BloomReject(b *testing.B) {
 	e := benchEngine(b)
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		e.Search("xzqwvp")
 	}
 }
 
 func BenchmarkEngineSearch_WithPopularity(b *testing.B) {
 	e := benchEngine(b)
-	for i := 0; i < 100; i++ {
-		e.RecordSelection(i % 20)
+	for range 100 {
+		e.RecordSelection(0)
 	}
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		e.Search("budweiser")
 	}
 }
@@ -212,8 +210,8 @@ func BenchmarkHTTPSearch_ColdCache(b *testing.B) {
 	app := &App{engine: e, cache: newFragmentCache(1024)}
 	app.loadTemplates()
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		app.cache.invalidate() // force cold cache
+	for b.Loop() {
+		app.cache.invalidate()
 		req := httptest.NewRequest("GET", "/search?q=bud", nil)
 		w := httptest.NewRecorder()
 		app.handleSearch(w, req)
@@ -224,12 +222,11 @@ func BenchmarkHTTPSearch_WarmCache(b *testing.B) {
 	e := benchEngine(b)
 	app := &App{engine: e, cache: newFragmentCache(1024)}
 	app.loadTemplates()
-	// Warm the cache
 	req := httptest.NewRequest("GET", "/search?q=bud", nil)
 	w := httptest.NewRecorder()
 	app.handleSearch(w, req)
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		req := httptest.NewRequest("GET", "/search?q=bud", nil)
 		w := httptest.NewRecorder()
 		app.handleSearch(w, req)
@@ -240,7 +237,7 @@ func BenchmarkHTTPSelect(b *testing.B) {
 	e := benchEngine(b)
 	app := &App{engine: e, cache: newFragmentCache(1024)}
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		body := strings.NewReader(`{"id": "0"}`)
 		req := httptest.NewRequest("POST", "/select", body)
 		req.Header.Set("Content-Type", "application/json")

@@ -1,34 +1,31 @@
 package index
 
 import (
-	"reflect"
 	"search/catalog"
-	"sort"
+	"slices"
 	"testing"
 )
 
 func TestExtractTrigrams(t *testing.T) {
 	tests := []struct {
-		input    string
-		expected []string
+		input string
+		want  []string
 	}{
-		{"shoes", []string{"sho", "hoe", "oes"}},
+		{"shoes", []string{"hoe", "oes", "sho"}},
 		{"hi", nil},
 		{"a", nil},
 		{"", nil},
 		{"abc", []string{"abc"}},
-		{"SHOES", []string{"sho", "hoe", "oes"}},
-		{"  Nike  ", []string{"nik", "ike"}},
+		{"SHOES", []string{"hoe", "oes", "sho"}},
+		{"  Nike  ", []string{"ike", "nik"}},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
 			got := ExtractTrigrams(tt.input)
-			sort.Strings(got)
-			expected := tt.expected
-			sort.Strings(expected)
-			if !reflect.DeepEqual(got, expected) {
-				t.Errorf("ExtractTrigrams(%q) = %v, want %v", tt.input, got, expected)
+			slices.Sort(got)
+			if !slices.Equal(got, tt.want) {
+				t.Errorf("ExtractTrigrams(%q) = %v, want %v", tt.input, got, tt.want)
 			}
 		})
 	}
@@ -78,7 +75,6 @@ func TestSearchPrefix(t *testing.T) {
 
 func TestSearchSubstring(t *testing.T) {
 	idx := NewIndex(testProducts())
-	// "pod" is a substring of "AirPods Pro"
 	results := idx.Search("pod")
 	found := false
 	for _, r := range results {
@@ -93,7 +89,6 @@ func TestSearchSubstring(t *testing.T) {
 
 func TestSearchFuzzy(t *testing.T) {
 	idx := NewIndex(testProducts())
-	// "budwiser" is a typo of "Budweiser" — shares trigrams "bud", "udw", "wis", "ise"
 	results := idx.Search("budwiser")
 	found := false
 	for _, r := range results {
@@ -108,7 +103,6 @@ func TestSearchFuzzy(t *testing.T) {
 
 func TestSearchShortQuery(t *testing.T) {
 	idx := NewIndex(testProducts())
-	// 1-2 char queries use prefix fallback
 	results := idx.Search("ni")
 	found := false
 	for _, r := range results {
@@ -149,7 +143,6 @@ func TestSearchCategories(t *testing.T) {
 	if len(results) == 0 {
 		t.Fatal("expected category results for 'bee'")
 	}
-
 	if results[0] != "beer" {
 		t.Errorf("expected best category 'beer', got %q", results[0])
 	}
