@@ -6,11 +6,11 @@ import (
 	"strings"
 	"testing"
 
-	"search/bloom"
-	"search/catalog"
-	"search/engine"
-	"search/index"
-	"search/ranking"
+	"github.com/mbow/go-xsearch/bloom"
+	"github.com/mbow/go-xsearch/catalog"
+	"github.com/mbow/go-xsearch/engine"
+	"github.com/mbow/go-xsearch/index"
+	"github.com/mbow/go-xsearch/ranking"
 )
 
 func benchProducts(b *testing.B) []catalog.Product {

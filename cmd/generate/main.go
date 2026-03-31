@@ -15,9 +15,9 @@ import (
 	"fmt"
 	"os"
 
-	"search/bloom"
-	"search/catalog"
-	"search/index"
+	"github.com/mbow/go-xsearch/bloom"
+	"github.com/mbow/go-xsearch/catalog"
+	"github.com/mbow/go-xsearch/index"
 
 	"github.com/fxamacker/cbor/v2"
 )

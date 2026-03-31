@@ -1,7 +1,7 @@
 package engine
 
 import (
-	"search/catalog"
+	"github.com/mbow/go-xsearch/catalog"
 	"testing"
 )
 

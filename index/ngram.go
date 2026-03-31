@@ -10,7 +10,7 @@ package index
 import (
 	"cmp"
 	"maps"
-	"search/catalog"
+	"github.com/mbow/go-xsearch/catalog"
 	"slices"
 	"strings"
 	"sync"

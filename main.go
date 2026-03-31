@@ -13,8 +13,8 @@ import (
 	"sync"
 	"time"
 
-	"search/catalog"
-	"search/engine"
+	"github.com/mbow/go-xsearch/catalog"
+	"github.com/mbow/go-xsearch/engine"
 )
 
 const (
