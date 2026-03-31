@@ -7,6 +7,7 @@ import (
 	"cmp"
 	"fmt"
 	"maps"
+	"github.com/mbow/go-xsearch/bm25"
 	"github.com/mbow/go-xsearch/bloom"
 	"github.com/mbow/go-xsearch/catalog"
 	"github.com/mbow/go-xsearch/index"
@@ -40,6 +41,7 @@ type Engine struct {
 	bloom         *bloom.Filter
 	index         *index.Index
 	ranker        *ranking.Ranker
+	bm25idx       *bm25.Index
 	prefixCache   map[string][]Result // precomputed results for 1-2 char prefixes
 	categoryCache map[string][]Result // precomputed top-N per category
 	catCacheDirty bool                // true when selections have changed
@@ -56,6 +58,9 @@ const (
 	minDirectResults  = 3
 	fallbackRelevance = 0.1
 	maxResults        = 10
+	bm25Alpha         = 0.5 // BM25 score weight
+	bm25PrefixAlpha   = 0.2 // prefix boost weight
+	bm25PopAlpha      = 0.3 // popularity weight in BM25 path
 )
 
 // New creates a search engine from the given product catalog.
@@ -65,6 +70,7 @@ func New(products []catalog.Product) *Engine {
 		bloom:    bloom.New(bloomSize, bloomHashCount),
 		index:    index.NewIndex(products),
 		ranker:   ranking.New(lambda, alpha),
+		bm25idx:  bm25.NewIndex(products),
 		resultPool: sync.Pool{
 			New: func() any { s := make([]Result, 0, maxResults); return &s },
 		},
@@ -94,7 +100,7 @@ func New(products []catalog.Product) *Engine {
 
 // NewFromEmbedded creates an engine using pre-built bloom filter and index
 // deserialized from raw CBOR bytes. Skips index construction entirely.
-func NewFromEmbedded(products []catalog.Product, bloomRaw, indexRaw []byte) (*Engine, error) {
+func NewFromEmbedded(products []catalog.Product, bloomRaw, indexRaw, bm25Raw []byte) (*Engine, error) {
 	var bs bloom.Snapshot
 	if err := cbor.Unmarshal(bloomRaw, &bs); err != nil {
 		return nil, fmt.Errorf("unmarshaling bloom snapshot: %w", err)
@@ -105,11 +111,17 @@ func NewFromEmbedded(products []catalog.Product, bloomRaw, indexRaw []byte) (*En
 		return nil, fmt.Errorf("unmarshaling index snapshot: %w", err)
 	}
 
+	var bm25s bm25.Snapshot
+	if err := cbor.Unmarshal(bm25Raw, &bm25s); err != nil {
+		return nil, fmt.Errorf("unmarshaling bm25 snapshot: %w", err)
+	}
+
 	e := &Engine{
 		products: products,
 		bloom:    bloom.FromSnapshot(bs),
 		index:    index.FromSnapshot(is, products),
 		ranker:   ranking.New(lambda, alpha),
+		bm25idx:  bm25.FromSnapshot(bm25s),
 		resultPool: sync.Pool{
 			New: func() any { s := make([]Result, 0, maxResults); return &s },
 		},
@@ -196,17 +208,20 @@ func (e *Engine) Search(query string) []Result {
 
 // searchInternal performs the full search pipeline.
 func (e *Engine) searchInternal(query string) []Result {
-	// Create scorer once — single time.Now() and single lock for entire search
 	score := e.ranker.Scorer()
 
-	trigrams := index.ExtractTrigrams(query)
+	// Try BM25 path first (word-level matching)
+	bm25Results := e.bm25idx.Search(query)
+	if len(bm25Results) > 0 {
+		return e.buildBM25Results(bm25Results, score)
+	}
 
-	// Short query bypass — skip Bloom, go straight to prefix search
+	// Fallback to Jaccard trigram path (handles typos/fuzzy)
+	trigrams := index.ExtractTrigrams(query)
 	if len(trigrams) == 0 {
 		return e.buildResults(e.index.Search(query), MatchDirect, score)
 	}
 
-	// Bloom filter check — fast rejection
 	anyPass := false
 	for _, g := range trigrams {
 		if e.bloom.MayContain(g) {
@@ -215,44 +230,34 @@ func (e *Engine) searchInternal(query string) []Result {
 		}
 	}
 
-	// Get a pooled result slice
 	pooled := e.getResults()
 	results := *pooled
 
 	if anyPass {
 		searchResults := e.index.Search(query)
-
-		// Count how many pass the quality threshold
 		goodResults := 0
 		for _, sr := range searchResults {
 			if sr.Score >= fallbackThreshold {
 				goodResults++
 			}
 		}
-
 		results = append(results, e.buildResults(searchResults, MatchDirect, score)...)
-
-		// If not enough good direct results, add category fallback
 		if goodResults < minDirectResults {
 			fallbackResults := e.categoryFallback(query, searchResults, score)
 			results = append(results, fallbackResults...)
 		}
 	} else {
-		// Bloom rejected everything — try category fallback only
 		results = append(results, e.categoryFallback(query, nil, score)...)
 	}
 
-	// Sort by score descending (slices.SortFunc avoids reflect-based Swapper)
 	slices.SortFunc(results, func(a, b Result) int {
-		return cmp.Compare(b.Score, a.Score) // descending
+		return cmp.Compare(b.Score, a.Score)
 	})
 
-	// Limit results
 	if len(results) > maxResults {
 		results = results[:maxResults]
 	}
 
-	// Copy out of pooled slice so we can return it to pool
 	out := make([]Result, len(results))
 	copy(out, results)
 
@@ -277,6 +282,49 @@ func (e *Engine) Ranker() *ranking.Ranker {
 
 // scorerFunc scores a product given its ID and relevance.
 type scorerFunc func(productID int, relevance float64) float64
+
+// buildBM25Results converts BM25 search results to engine results,
+// normalizing BM25 scores and blending with prefix boost and popularity.
+func (e *Engine) buildBM25Results(bm25Results []bm25.SearchResult, score scorerFunc) []Result {
+	maxBM25 := 0.0
+	for _, r := range bm25Results {
+		if r.Score > maxBM25 {
+			maxBM25 = r.Score
+		}
+	}
+	if maxBM25 == 0 {
+		maxBM25 = 1.0
+	}
+
+	results := make([]Result, 0, min(len(bm25Results), maxResults))
+	for _, r := range bm25Results {
+		if r.ProductID < 0 || r.ProductID >= len(e.products) {
+			continue
+		}
+
+		normalizedBM25 := r.Score / maxBM25
+		prefixBoost := 0.0
+		if r.PrefixMatch {
+			prefixBoost = 1.0
+		}
+
+		popScore := score(r.ProductID, 0)
+		combined := bm25Alpha*normalizedBM25 + bm25PrefixAlpha*prefixBoost + bm25PopAlpha*popScore
+
+		results = append(results, Result{
+			Product:   e.products[r.ProductID],
+			ProductID: r.ProductID,
+			Score:     combined,
+			MatchType: MatchDirect,
+		})
+
+		if len(results) >= maxResults {
+			break
+		}
+	}
+
+	return results
+}
 
 // buildResults converts index search results to engine results with combined scores.
 func (e *Engine) buildResults(searchResults []index.SearchResult, matchType MatchType, score scorerFunc) []Result {
