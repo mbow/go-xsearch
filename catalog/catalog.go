@@ -14,7 +14,7 @@ import (
 type Product struct {
 	Name     string   `json:"name" cbor:"name"`
 	Category string   `json:"category" cbor:"category"`
-	Tags     []string `json:"tags,omitempty" cbor:"tags,omitempty"`
+	Tags     []string `json:"tags,omitzero" cbor:"tags,omitempty"`
 }
 
 // LoadProducts reads a JSON file at path and returns the parsed products.

@@ -171,9 +171,8 @@ func (app *App) handleSelect(w http.ResponseWriter, r *http.Request) {
 
 func (app *App) startSnapshots(interval time.Duration) {
 	path := filepath.Join(app.dataDir, "popularity.json")
-	ticker := time.NewTicker(interval)
 	go func() {
-		for range ticker.C {
+		for range time.Tick(interval) {
 			if err := app.engine.Ranker().Save(path); err != nil {
 				log.Printf("error saving popularity data: %v", err)
 			}
