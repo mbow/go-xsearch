@@ -29,14 +29,15 @@ type SearchResult struct {
 
 // Index holds the precomputed BM25 data structures for a product catalog.
 type Index struct {
-	idf          map[string]float64
-	termFreqs    []map[string]int
-	docLens      []int
-	avgDocLen    float64
-	wordPrefixes []map[string]struct{}
-	posting      map[string][]int
-	k1           float64
-	b            float64
+	idf            map[string]float64
+	termFreqs      []map[string]int
+	docLens        []int
+	avgDocLen      float64
+	wordPrefixes   []map[string]struct{}   // product ID → set of word prefixes
+	prefixPosting  map[string][]int        // prefix → product IDs (inverted index for fast prefix lookup)
+	posting        map[string][]int
+	k1             float64
+	b              float64
 }
 
 // Tokenize splits s on whitespace, lowercases each token, and filters out
@@ -77,13 +78,14 @@ func hasAlphanumeric(s string) bool {
 func NewIndex(products []catalog.Product) *Index {
 	n := len(products)
 	idx := &Index{
-		idf:          make(map[string]float64),
-		termFreqs:    make([]map[string]int, n),
-		docLens:      make([]int, n),
-		wordPrefixes: make([]map[string]struct{}, n),
-		posting:      make(map[string][]int),
-		k1:           DefaultK1,
-		b:            DefaultB,
+		idf:           make(map[string]float64),
+		termFreqs:     make([]map[string]int, n),
+		docLens:       make([]int, n),
+		wordPrefixes:  make([]map[string]struct{}, n),
+		prefixPosting: make(map[string][]int),
+		posting:       make(map[string][]int),
+		k1:            DefaultK1,
+		b:             DefaultB,
 	}
 
 	// df tracks how many documents contain each term.
@@ -123,6 +125,11 @@ func NewIndex(products []catalog.Product) *Index {
 			}
 		}
 		idx.wordPrefixes[i] = prefixes
+
+		// Build prefix inverted index for O(1) prefix lookup at query time.
+		for pfx := range prefixes {
+			idx.prefixPosting[pfx] = append(idx.prefixPosting[pfx], i)
+		}
 	}
 
 	// Average document length.
@@ -177,19 +184,13 @@ func (idx *Index) Search(query string) []SearchResult {
 		return nil
 	}
 
-	// Collect candidates from posting lists.
+	// Collect candidates from term posting lists and prefix posting lists.
 	seen := make(map[int]struct{})
 	for _, term := range queryTerms {
 		for _, id := range idx.posting[term] {
 			seen[id] = struct{}{}
 		}
-	}
-
-	// Also collect candidates via prefix matching (scan all products).
-	// If posting lists found candidates, prefix matches still contribute
-	// additional candidates that receive a prefix bonus score.
-	for id := range idx.wordPrefixes {
-		if idx.HasPrefixMatch(id, queryTerms) {
+		for _, id := range idx.prefixPosting[term] {
 			seen[id] = struct{}{}
 		}
 	}
@@ -240,14 +241,15 @@ func (idx *Index) Search(query string) []SearchResult {
 
 // Snapshot is a serializable representation of an Index, suitable for CBOR encoding.
 type Snapshot struct {
-	IDF          map[string]float64 `cbor:"idf"`
-	TermFreqs    []map[string]int   `cbor:"term_freqs"`
-	DocLens      []int              `cbor:"doc_lens"`
-	AvgDocLen    float64            `cbor:"avg_doc_len"`
-	WordPrefixes [][]string         `cbor:"word_prefixes"`
-	Posting      map[string][]int   `cbor:"posting"`
-	K1           float64            `cbor:"k1"`
-	B            float64            `cbor:"b"`
+	IDF           map[string]float64 `cbor:"idf"`
+	TermFreqs     []map[string]int   `cbor:"term_freqs"`
+	DocLens       []int              `cbor:"doc_lens"`
+	AvgDocLen     float64            `cbor:"avg_doc_len"`
+	WordPrefixes  [][]string         `cbor:"word_prefixes"`
+	PrefixPosting map[string][]int   `cbor:"prefix_posting"`
+	Posting       map[string][]int   `cbor:"posting"`
+	K1            float64            `cbor:"k1"`
+	B             float64            `cbor:"b"`
 }
 
 // ToSnapshot converts the Index into a Snapshot for serialization.
@@ -263,14 +265,15 @@ func (idx *Index) ToSnapshot() Snapshot {
 		wp[i] = s
 	}
 	return Snapshot{
-		IDF:          idx.idf,
-		TermFreqs:    idx.termFreqs,
-		DocLens:      idx.docLens,
-		AvgDocLen:    idx.avgDocLen,
-		WordPrefixes: wp,
-		Posting:      idx.posting,
-		K1:           idx.k1,
-		B:            idx.b,
+		IDF:           idx.idf,
+		TermFreqs:     idx.termFreqs,
+		DocLens:       idx.docLens,
+		AvgDocLen:     idx.avgDocLen,
+		WordPrefixes:  wp,
+		PrefixPosting: idx.prefixPosting,
+		Posting:       idx.posting,
+		K1:            idx.k1,
+		B:             idx.b,
 	}
 }
 
@@ -286,13 +289,14 @@ func FromSnapshot(s Snapshot) *Index {
 		wp[i] = m
 	}
 	return &Index{
-		idf:          s.IDF,
-		termFreqs:    s.TermFreqs,
-		docLens:      s.DocLens,
-		avgDocLen:    s.AvgDocLen,
-		wordPrefixes: wp,
-		posting:      s.Posting,
-		k1:           s.K1,
-		b:            s.B,
+		idf:           s.IDF,
+		termFreqs:     s.TermFreqs,
+		docLens:       s.DocLens,
+		avgDocLen:     s.AvgDocLen,
+		wordPrefixes:  wp,
+		prefixPosting: s.PrefixPosting,
+		posting:       s.Posting,
+		k1:            s.K1,
+		b:             s.B,
 	}
 }
