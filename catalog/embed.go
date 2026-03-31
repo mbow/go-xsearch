@@ -23,6 +23,7 @@ type payload struct {
 	Products []Product       `cbor:"products"`
 	BloomRaw cbor.RawMessage `cbor:"bloom"`
 	IndexRaw cbor.RawMessage `cbor:"index"`
+	BM25Raw  cbor.RawMessage `cbor:"bm25"`
 }
 
 var (
@@ -86,6 +87,13 @@ func EmbeddedBloomRaw() ([]byte, error) {
 func EmbeddedIndexRaw() ([]byte, error) {
 	initEmbedded()
 	return []byte(decoded.IndexRaw), initErr
+}
+
+// EmbeddedBM25Raw returns the raw CBOR bytes of the pre-built BM25 index snapshot.
+// The caller (typically [engine.NewFromEmbedded]) unmarshals this into [bm25.Snapshot].
+func EmbeddedBM25Raw() ([]byte, error) {
+	initEmbedded()
+	return []byte(decoded.BM25Raw), initErr
 }
 
 // GetByName looks up a product by exact name. Returns nil, nil if not found.
