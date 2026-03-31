@@ -12,6 +12,7 @@ package ranking
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io/fs"
 	"math"
 	"os"
@@ -121,9 +122,12 @@ func (r *Ranker) CombinedScore(productID int, relevance float64) float64 {
 }
 
 // Scorer returns a reusable scoring function that captures a single time.Now()
-// and a single lock acquisition for the max score. Call this once per search,
+// and a snapshot of the current popularity state. Call this once per search,
 // then use the returned function to score each result — avoids repeated
 // time.Now() and lock overhead per product.
+//
+// The snapshot is a pre-computed map of product ID to raw decay score, taken
+// under the lock, so the returned closure is safe for concurrent use.
 func (r *Ranker) Scorer() func(productID int, relevance float64) float64 {
 	r.mu.Lock()
 	now := time.Now()
@@ -131,58 +135,60 @@ func (r *Ranker) Scorer() func(productID int, relevance float64) float64 {
 	maxScore := r.maxCached
 	alpha := r.alpha
 	lambda := r.lambda
-	// Hold a direct reference to the selections map under RLock semantics.
-	// Safe because: the map keys (product IDs) don't change during a search,
-	// and timestamp slices are only appended to (append may reallocate but
-	// the old backing array remains valid for reads). New entries added
-	// concurrently via RecordSelection won't be visible, which is fine —
-	// they'll show up in the next search.
-	sel := r.selections
+
+	// Pre-compute decay scores under the lock to avoid a data race.
+	// The closure only reads this local map — no shared state.
+	scores := make(map[int]float64, len(r.selections))
+	for id, timestamps := range r.selections {
+		var s float64
+		for _, ts := range timestamps {
+			ageDays := now.Sub(ts).Hours() / 24
+			s += math.Exp(-lambda * ageDays)
+		}
+		scores[id] = s
+	}
 	r.mu.Unlock()
 
 	return func(productID int, relevance float64) float64 {
 		var pop float64
 		if maxScore > 0 {
-			timestamps := sel[productID]
-			var score float64
-			for _, ts := range timestamps {
-				ageDays := now.Sub(ts).Hours() / 24
-				score += math.Exp(-lambda * ageDays)
-			}
-			pop = score / maxScore
+			pop = scores[productID] / maxScore
 		}
 		return alpha*relevance + (1-alpha)*pop
 	}
 }
 
-// Save writes all selection data to a JSON file.
+// Save writes all selection data to a JSON file at path.
 func (r *Ranker) Save(path string) error {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
 	data, err := json.Marshal(r.selections)
 	if err != nil {
-		return err
+		return fmt.Errorf("ranking: marshaling selections: %w", err)
 	}
-	return os.WriteFile(path, data, 0644)
+	if err := os.WriteFile(path, data, 0644); err != nil {
+		return fmt.Errorf("ranking: writing %s: %w", path, err)
+	}
+	return nil
 }
 
-// Load reads selection data from a JSON file. If the file does not exist,
-// this is a no-op (fresh start with no prior popularity data).
+// Load reads selection data from a JSON file at path. If the file does not
+// exist, this is a no-op (fresh start with no prior popularity data).
 func (r *Ranker) Load(path string) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			return nil
 		}
-		return err
+		return fmt.Errorf("ranking: reading %s: %w", path, err)
 	}
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	if err := json.Unmarshal(data, &r.selections); err != nil {
-		return err
+		return fmt.Errorf("ranking: unmarshaling selections: %w", err)
 	}
 	r.maxDirty = true
 	return nil

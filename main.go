@@ -17,6 +17,12 @@ import (
 	"search/engine"
 )
 
+const (
+	maxQueryLen    = 200        // maximum search query length in bytes
+	maxSelectBody  = 256        // maximum POST /select body size in bytes
+	snapshotPeriod = 60 * time.Second
+)
+
 // App holds application state.
 type App struct {
 	engine     *engine.Engine
@@ -78,18 +84,25 @@ func (app *App) loadTemplates() {
 }
 
 func (app *App) handleIndex(w http.ResponseWriter, r *http.Request) {
-	app.indexTmpl.Execute(w, nil)
+	if err := app.indexTmpl.Execute(w, nil); err != nil {
+		log.Printf("error rendering index template: %v", err)
+	}
 }
 
 func (app *App) handleSearch(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query().Get("q")
 
-	// Check fragment cache first
+	// Truncate overly long queries to bound cache key size and search work.
+	if len(query) > maxQueryLen {
+		query = query[:maxQueryLen]
+	}
+
+	// Check fragment cache first.
 	if cached, ok := app.cache.get(query); ok {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("Content-Length", strconv.Itoa(len(cached)))
 		w.Header().Set("X-Cache", "HIT")
-		w.Write(cached)
+		w.Write(cached) //nolint:errcheck // best-effort write to HTTP client
 		return
 	}
 
@@ -104,24 +117,27 @@ func (app *App) handleSearch(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Render to buffer so we can cache it
 	var buf bytes.Buffer
-	app.resultTmpl.Execute(&buf, data)
+	if err := app.resultTmpl.Execute(&buf, data); err != nil {
+		log.Printf("error rendering results template: %v", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
 	rendered := buf.Bytes()
 
-	// Cache the rendered fragment
 	app.cache.set(query, rendered)
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Content-Length", strconv.Itoa(len(rendered)))
 	w.Header().Set("X-Cache", "MISS")
-	w.Write(rendered)
+	w.Write(rendered) //nolint:errcheck // best-effort write to HTTP client
 }
 
 func (app *App) handleSelect(w http.ResponseWriter, r *http.Request) {
-	var idStr string
+	// Limit body size to prevent abuse.
+	r.Body = http.MaxBytesReader(w, r.Body, maxSelectBody)
 
-	// HTMX hx-vals sends JSON body by default
+	var idStr string
 	if r.Header.Get("Content-Type") == "application/json" {
 		var req struct {
 			ID string `json:"id"`
@@ -132,7 +148,6 @@ func (app *App) handleSelect(w http.ResponseWriter, r *http.Request) {
 		}
 		idStr = req.ID
 	} else {
-		// Form-encoded fallback
 		idStr = r.FormValue("id")
 	}
 
@@ -142,8 +157,14 @@ func (app *App) handleSelect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Reject IDs outside the valid product range.
+	productCount, _ := catalog.EmbeddedCount()
+	if id < 0 || id >= productCount {
+		http.Error(w, "product ID out of range", http.StatusBadRequest)
+		return
+	}
+
 	app.engine.RecordSelection(id)
-	// Invalidate cache since popularity changed, affecting result ordering
 	app.cache.invalidate()
 	w.WriteHeader(http.StatusOK)
 }
@@ -203,7 +224,7 @@ func main() {
 
 	// Prune old data and start periodic snapshots
 	app.engine.Ranker().Prune(90)
-	app.startSnapshots(60 * time.Second)
+	app.startSnapshots(snapshotPeriod)
 
 	// Routes
 	mux := http.NewServeMux()
