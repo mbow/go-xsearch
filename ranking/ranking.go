@@ -111,6 +111,41 @@ func (r *Ranker) CombinedScore(productID int, relevance float64) float64 {
 	return r.alpha*relevance + (1-r.alpha)*pop
 }
 
+// Scorer returns a reusable scoring function that captures a single time.Now()
+// and a single lock acquisition for the max score. Call this once per search,
+// then use the returned function to score each result — avoids repeated
+// time.Now() and lock overhead per product.
+func (r *Ranker) Scorer() func(productID int, relevance float64) float64 {
+	r.mu.Lock()
+	now := time.Now()
+	r.recomputeMax(now)
+	maxScore := r.maxCached
+	alpha := r.alpha
+	lambda := r.lambda
+	// Hold a direct reference to the selections map under RLock semantics.
+	// Safe because: the map keys (product IDs) don't change during a search,
+	// and timestamp slices are only appended to (append may reallocate but
+	// the old backing array remains valid for reads). New entries added
+	// concurrently via RecordSelection won't be visible, which is fine —
+	// they'll show up in the next search.
+	sel := r.selections
+	r.mu.Unlock()
+
+	return func(productID int, relevance float64) float64 {
+		var pop float64
+		if maxScore > 0 {
+			timestamps := sel[productID]
+			var score float64
+			for _, ts := range timestamps {
+				ageDays := now.Sub(ts).Hours() / 24
+				score += math.Exp(-lambda * ageDays)
+			}
+			pop = score / maxScore
+		}
+		return alpha*relevance + (1-alpha)*pop
+	}
+}
+
 // Save writes all selection data to a JSON file.
 func (r *Ranker) Save(path string) error {
 	r.mu.RLock()

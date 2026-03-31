@@ -1,12 +1,13 @@
 package engine
 
 import (
+	"cmp"
 	"fmt"
 	"search/bloom"
 	"search/catalog"
 	"search/index"
 	"search/ranking"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 
@@ -164,11 +165,14 @@ func (e *Engine) Search(query string) []Result {
 
 // searchInternal performs the full search pipeline.
 func (e *Engine) searchInternal(query string) []Result {
+	// Create scorer once — single time.Now() and single lock for entire search
+	score := e.ranker.Scorer()
+
 	trigrams := index.ExtractTrigrams(query)
 
 	// Short query bypass — skip Bloom, go straight to prefix search
 	if len(trigrams) == 0 {
-		return e.buildResults(e.index.Search(query), MatchDirect)
+		return e.buildResults(e.index.Search(query), MatchDirect, score)
 	}
 
 	// Bloom filter check — fast rejection
@@ -195,21 +199,21 @@ func (e *Engine) searchInternal(query string) []Result {
 			}
 		}
 
-		results = append(results, e.buildResults(searchResults, MatchDirect)...)
+		results = append(results, e.buildResults(searchResults, MatchDirect, score)...)
 
 		// If not enough good direct results, add category fallback
 		if goodResults < minDirectResults {
-			fallbackResults := e.categoryFallback(query, searchResults)
+			fallbackResults := e.categoryFallback(query, searchResults, score)
 			results = append(results, fallbackResults...)
 		}
 	} else {
 		// Bloom rejected everything — try category fallback only
-		results = append(results, e.categoryFallback(query, nil)...)
+		results = append(results, e.categoryFallback(query, nil, score)...)
 	}
 
-	// Sort by score descending
-	sort.Slice(results, func(i, j int) bool {
-		return results[i].Score > results[j].Score
+	// Sort by score descending (slices.SortFunc avoids reflect-based Swapper)
+	slices.SortFunc(results, func(a, b Result) int {
+		return cmp.Compare(b.Score, a.Score) // descending
 	})
 
 	// Limit results
@@ -237,18 +241,21 @@ func (e *Engine) Ranker() *ranking.Ranker {
 	return e.ranker
 }
 
+// scorerFunc scores a product given its ID and relevance.
+type scorerFunc func(productID int, relevance float64) float64
+
 // buildResults converts index search results to engine results with combined scores.
-func (e *Engine) buildResults(searchResults []index.SearchResult, matchType MatchType) []Result {
+func (e *Engine) buildResults(searchResults []index.SearchResult, matchType MatchType, score scorerFunc) []Result {
 	results := make([]Result, 0, len(searchResults))
 	for _, sr := range searchResults {
 		if sr.ProductID < 0 || sr.ProductID >= len(e.products) {
 			continue
 		}
-		score := e.ranker.CombinedScore(sr.ProductID, sr.Score)
+		s := score(sr.ProductID, sr.Score)
 		results = append(results, Result{
 			Product:   e.products[sr.ProductID],
 			ProductID: sr.ProductID,
-			Score:     score,
+			Score:     s,
 			MatchType: matchType,
 		})
 	}
@@ -256,7 +263,7 @@ func (e *Engine) buildResults(searchResults []index.SearchResult, matchType Matc
 }
 
 // categoryFallback finds the best matching category and returns its popular products.
-func (e *Engine) categoryFallback(query string, exclude []index.SearchResult) []Result {
+func (e *Engine) categoryFallback(query string, exclude []index.SearchResult, score scorerFunc) []Result {
 	categories := e.index.SearchCategories(query)
 	if len(categories) == 0 {
 		return nil
@@ -278,11 +285,11 @@ func (e *Engine) categoryFallback(query string, exclude []index.SearchResult) []
 		if id < 0 || id >= len(e.products) {
 			continue
 		}
-		score := e.ranker.CombinedScore(id, fallbackRelevance)
+		s := score(id, fallbackRelevance)
 		results = append(results, Result{
 			Product:   e.products[id],
 			ProductID: id,
-			Score:     score,
+			Score:     s,
 			MatchType: MatchFallback,
 		})
 	}
