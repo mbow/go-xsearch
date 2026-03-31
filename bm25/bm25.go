@@ -237,3 +237,62 @@ func (idx *Index) Search(query string) []SearchResult {
 
 	return results
 }
+
+// Snapshot is a serializable representation of an Index, suitable for CBOR encoding.
+type Snapshot struct {
+	IDF          map[string]float64 `cbor:"idf"`
+	TermFreqs    []map[string]int   `cbor:"term_freqs"`
+	DocLens      []int              `cbor:"doc_lens"`
+	AvgDocLen    float64            `cbor:"avg_doc_len"`
+	WordPrefixes [][]string         `cbor:"word_prefixes"`
+	Posting      map[string][]int   `cbor:"posting"`
+	K1           float64            `cbor:"k1"`
+	B            float64            `cbor:"b"`
+}
+
+// ToSnapshot converts the Index into a Snapshot for serialization.
+// Word prefix sets are converted to sorted string slices.
+func (idx *Index) ToSnapshot() Snapshot {
+	wp := make([][]string, len(idx.wordPrefixes))
+	for i, m := range idx.wordPrefixes {
+		s := make([]string, 0, len(m))
+		for k := range m {
+			s = append(s, k)
+		}
+		slices.Sort(s)
+		wp[i] = s
+	}
+	return Snapshot{
+		IDF:          idx.idf,
+		TermFreqs:    idx.termFreqs,
+		DocLens:      idx.docLens,
+		AvgDocLen:    idx.avgDocLen,
+		WordPrefixes: wp,
+		Posting:      idx.posting,
+		K1:           idx.k1,
+		B:            idx.b,
+	}
+}
+
+// FromSnapshot restores an Index from a Snapshot.
+// Word prefix string slices are converted back to sets.
+func FromSnapshot(s Snapshot) *Index {
+	wp := make([]map[string]struct{}, len(s.WordPrefixes))
+	for i, list := range s.WordPrefixes {
+		m := make(map[string]struct{}, len(list))
+		for _, k := range list {
+			m[k] = struct{}{}
+		}
+		wp[i] = m
+	}
+	return &Index{
+		idf:          s.IDF,
+		termFreqs:    s.TermFreqs,
+		docLens:      s.DocLens,
+		avgDocLen:    s.AvgDocLen,
+		wordPrefixes: wp,
+		posting:      s.Posting,
+		k1:           s.K1,
+		b:            s.B,
+	}
+}

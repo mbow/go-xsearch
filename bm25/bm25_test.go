@@ -150,3 +150,38 @@ func TestSearch_Empty(t *testing.T) {
 		t.Errorf("expected nil for empty query, got %v", results)
 	}
 }
+
+func TestSnapshotRoundTrip(t *testing.T) {
+	idx := NewIndex(testProducts())
+
+	// Get original results for "bud".
+	origResults := idx.Search("bud")
+	if len(origResults) == 0 {
+		t.Fatal("expected results for 'bud' from original index")
+	}
+
+	// Snapshot and restore.
+	snap := idx.ToSnapshot()
+	restored := FromSnapshot(snap)
+
+	// Search restored index for "bud" and compare.
+	restoredResults := restored.Search("bud")
+	if len(restoredResults) != len(origResults) {
+		t.Fatalf("result count mismatch: original=%d, restored=%d",
+			len(origResults), len(restoredResults))
+	}
+	for i := range origResults {
+		if origResults[i].ProductID != restoredResults[i].ProductID {
+			t.Errorf("result[%d] ProductID: original=%d, restored=%d",
+				i, origResults[i].ProductID, restoredResults[i].ProductID)
+		}
+		if origResults[i].Score != restoredResults[i].Score {
+			t.Errorf("result[%d] Score: original=%f, restored=%f",
+				i, origResults[i].Score, restoredResults[i].Score)
+		}
+		if origResults[i].PrefixMatch != restoredResults[i].PrefixMatch {
+			t.Errorf("result[%d] PrefixMatch: original=%v, restored=%v",
+				i, origResults[i].PrefixMatch, restoredResults[i].PrefixMatch)
+		}
+	}
+}
