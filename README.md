@@ -8,7 +8,7 @@ A fast, zero-dependency** autocomplete search engine built with Go and HTMX. (**
 requires CBOR but can be removed for fast start times but not required for all
 use cases)
 
-<video src="docs/demo.webm" autoplay loop muted playsinline width="100%"></video>
+![Search Demo](docs/demo.gif)
 
 <!-- Record a video of the search UI in action and save to docs/demo.webm -->
 
