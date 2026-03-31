@@ -7,11 +7,12 @@ import (
 
 // Product represents a single item in the product catalog.
 type Product struct {
-	Name     string `json:"name"`
-	Category string `json:"category"`
+	Name     string `json:"name" cbor:"name"`
+	Category string `json:"category" cbor:"category"`
 }
 
 // LoadProducts reads a JSON file and returns a slice of products.
+// Kept for testing and as a fallback when CBOR data is not generated.
 func LoadProducts(path string) ([]Product, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {

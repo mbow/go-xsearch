@@ -89,10 +89,10 @@ func (app *App) startSnapshots(interval time.Duration) {
 func main() {
 	dataDir := "data"
 
-	// Load products
-	products, err := catalog.LoadProducts(filepath.Join(dataDir, "products.json"))
+	// Load products from compiled-in CBOR data (no file I/O at startup)
+	products, err := catalog.EmbeddedProducts()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error loading products: %v\n", err)
+		fmt.Fprintf(os.Stderr, "error loading embedded products: %v\n", err)
 		os.Exit(1)
 	}
 
