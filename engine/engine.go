@@ -323,6 +323,10 @@ func (e *Engine) buildBM25Results(bm25Results []bm25.SearchResult, score scorerF
 		}
 	}
 
+	slices.SortFunc(results, func(a, b Result) int {
+		return cmp.Compare(b.Score, a.Score)
+	})
+
 	return results
 }
 

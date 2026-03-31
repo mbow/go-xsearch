@@ -202,7 +202,13 @@ func main() {
 		os.Exit(1)
 	}
 
-	eng, err := engine.NewFromEmbedded(products, bloomRaw, indexRaw)
+	bm25Raw, err := catalog.EmbeddedBM25Raw()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error loading embedded bm25: %v\n", err)
+		os.Exit(1)
+	}
+
+	eng, err := engine.NewFromEmbedded(products, bloomRaw, indexRaw, bm25Raw)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error creating engine: %v\n", err)
 		os.Exit(1)

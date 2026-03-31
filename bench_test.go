@@ -33,7 +33,11 @@ func benchEngine(b *testing.B) *engine.Engine {
 	if err != nil {
 		b.Fatal(err)
 	}
-	e, err := engine.NewFromEmbedded(products, bloomRaw, indexRaw)
+	bm25Raw, err := catalog.EmbeddedBM25Raw()
+	if err != nil {
+		b.Fatal(err)
+	}
+	e, err := engine.NewFromEmbedded(products, bloomRaw, indexRaw, bm25Raw)
 	if err != nil {
 		b.Fatal(err)
 	}
