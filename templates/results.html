@@ -4,7 +4,8 @@
 <div class="result-item"
      hx-post="/select"
      hx-vals='{"id": "{{.ProductID}}"}'
-     hx-swap="none">
+     hx-swap="none"
+     hx-indicator="false">
     <div class="result-name">{{.Product.Name}}</div>
     <div class="result-category">{{.Product.Category}}</div>
 </div>
@@ -17,7 +18,8 @@
 <div class="result-item"
      hx-post="/select"
      hx-vals='{"id": "{{.ProductID}}"}'
-     hx-swap="none">
+     hx-swap="none"
+     hx-indicator="false">
     <div class="result-name">{{.Product.Name}}</div>
     <div class="result-category">{{.Product.Category}}</div>
 </div>

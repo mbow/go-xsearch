@@ -87,6 +87,7 @@ func (app *App) handleSearch(w http.ResponseWriter, r *http.Request) {
 	// Check fragment cache first
 	if cached, ok := app.cache.get(query); ok {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Content-Length", strconv.Itoa(len(cached)))
 		w.Header().Set("X-Cache", "HIT")
 		w.Write(cached)
 		return
@@ -112,21 +113,31 @@ func (app *App) handleSearch(w http.ResponseWriter, r *http.Request) {
 	app.cache.set(query, rendered)
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Content-Length", strconv.Itoa(len(rendered)))
 	w.Header().Set("X-Cache", "MISS")
 	w.Write(rendered)
 }
 
 func (app *App) handleSelect(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		ID string `json:"id"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid request body", http.StatusBadRequest)
-		return
+	var idStr string
+
+	// HTMX hx-vals sends JSON body by default
+	if r.Header.Get("Content-Type") == "application/json" {
+		var req struct {
+			ID string `json:"id"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "invalid request body", http.StatusBadRequest)
+			return
+		}
+		idStr = req.ID
+	} else {
+		// Form-encoded fallback
+		idStr = r.FormValue("id")
 	}
 
-	id, err := strconv.Atoi(req.ID)
-	if err != nil {
+	id, err := strconv.Atoi(idStr)
+	if err != nil || idStr == "" {
 		http.Error(w, "invalid product ID", http.StatusBadRequest)
 		return
 	}

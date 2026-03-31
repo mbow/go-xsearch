@@ -34,8 +34,10 @@
                placeholder="Search products..."
                autocomplete="off"
                hx-get="/search"
-               hx-trigger="keyup changed delay:250ms, search"
+               hx-trigger="keyup changed delay:150ms, search"
                hx-target="#results"
+               hx-swap="innerHTML"
+               hx-push-url="false"
                hx-indicator="#spinner">
         <span id="spinner" class="htmx-indicator"> Searching...</span>
     </div>
