@@ -224,7 +224,7 @@ func (idx *Index) Search(query string) []SearchResult {
 		}
 	}
 
-	// Sort by score descending.
+	// Sort by score descending, then by ProductID ascending as tiebreaker.
 	slices.SortFunc(results, func(a, b SearchResult) int {
 		if a.Score > b.Score {
 			return -1
@@ -232,7 +232,7 @@ func (idx *Index) Search(query string) []SearchResult {
 		if a.Score < b.Score {
 			return 1
 		}
-		return 0
+		return a.ProductID - b.ProductID
 	})
 
 	return results

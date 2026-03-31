@@ -185,3 +185,33 @@ func TestSnapshotRoundTrip(t *testing.T) {
 		}
 	}
 }
+
+func BenchmarkBM25Score(b *testing.B) {
+	idx := NewIndex(testProducts())
+	terms := Tokenize("budweiser")
+	for b.Loop() {
+		idx.Score(0, terms)
+	}
+}
+
+func BenchmarkBM25Search(b *testing.B) {
+	idx := NewIndex(testProducts())
+	for b.Loop() {
+		idx.Search("budweiser")
+	}
+}
+
+func BenchmarkBM25Search_PrefixBoost(b *testing.B) {
+	idx := NewIndex(testProducts())
+	for b.Loop() {
+		idx.Search("bud")
+	}
+}
+
+func BenchmarkBM25FromSnapshot(b *testing.B) {
+	idx := NewIndex(testProducts())
+	snap := idx.ToSnapshot()
+	for b.Loop() {
+		FromSnapshot(snap)
+	}
+}
