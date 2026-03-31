@@ -6,6 +6,8 @@ import (
 	"search/index"
 	"search/ranking"
 	"sort"
+	"strings"
+	"sync"
 )
 
 // MatchType indicates how a result was found.
@@ -26,10 +28,12 @@ type Result struct {
 
 // Engine orchestrates search across all components.
 type Engine struct {
-	products []catalog.Product
-	bloom    *bloom.Filter
-	index    *index.Index
-	ranker   *ranking.Ranker
+	products    []catalog.Product
+	bloom       *bloom.Filter
+	index       *index.Index
+	ranker      *ranking.Ranker
+	prefixCache map[string][]Result // precomputed results for 1-2 char prefixes
+	resultPool  sync.Pool
 }
 
 const (
@@ -50,6 +54,9 @@ func New(products []catalog.Product) *Engine {
 		bloom:    bloom.New(bloomSize, bloomHashCount),
 		index:    index.NewIndex(products),
 		ranker:   ranking.New(lambda, alpha),
+		resultPool: sync.Pool{
+			New: func() any { s := make([]Result, 0, maxResults); return &s },
+		},
 	}
 
 	// Populate Bloom filter with all product and category trigrams
@@ -62,7 +69,48 @@ func New(products []catalog.Product) *Engine {
 		}
 	}
 
+	// Precompute prefix results for all 1-2 character prefixes
+	e.buildPrefixCache()
+
 	return e
+}
+
+// buildPrefixCache precomputes search results for every 1-char and 2-char
+// prefix that matches at least one product. These are the highest-traffic
+// queries since every search starts with 1-2 characters.
+func (e *Engine) buildPrefixCache() {
+	e.prefixCache = make(map[string][]Result)
+
+	// Collect unique 1-char and 2-char prefixes from product names
+	prefixes := make(map[string]struct{})
+	for _, p := range e.products {
+		name := strings.ToLower(p.Name)
+		if len(name) >= 1 {
+			prefixes[name[:1]] = struct{}{}
+		}
+		if len(name) >= 2 {
+			prefixes[name[:2]] = struct{}{}
+		}
+	}
+
+	// Precompute results for each prefix
+	for prefix := range prefixes {
+		results := e.searchInternal(prefix)
+		if len(results) > 0 {
+			e.prefixCache[prefix] = results
+		}
+	}
+}
+
+// getResults gets a result slice from the pool.
+func (e *Engine) getResults() *[]Result {
+	return e.resultPool.Get().(*[]Result)
+}
+
+// putResults returns a result slice to the pool.
+func (e *Engine) putResults(r *[]Result) {
+	*r = (*r)[:0]
+	e.resultPool.Put(r)
 }
 
 // Search returns ranked results for the given query.
@@ -71,6 +119,20 @@ func (e *Engine) Search(query string) []Result {
 		return nil
 	}
 
+	query = strings.ToLower(strings.TrimSpace(query))
+
+	// Check prefix cache for 1-2 char queries
+	if len(query) <= 2 {
+		if cached, ok := e.prefixCache[query]; ok {
+			return cached
+		}
+	}
+
+	return e.searchInternal(query)
+}
+
+// searchInternal performs the full search pipeline.
+func (e *Engine) searchInternal(query string) []Result {
 	trigrams := index.ExtractTrigrams(query)
 
 	// Short query bypass — skip Bloom, go straight to prefix search
@@ -87,7 +149,9 @@ func (e *Engine) Search(query string) []Result {
 		}
 	}
 
-	var results []Result
+	// Get a pooled result slice
+	pooled := e.getResults()
+	results := *pooled
 
 	if anyPass {
 		searchResults := e.index.Search(query)
@@ -100,7 +164,7 @@ func (e *Engine) Search(query string) []Result {
 			}
 		}
 
-		results = e.buildResults(searchResults, MatchDirect)
+		results = append(results, e.buildResults(searchResults, MatchDirect)...)
 
 		// If not enough good direct results, add category fallback
 		if goodResults < minDirectResults {
@@ -109,7 +173,7 @@ func (e *Engine) Search(query string) []Result {
 		}
 	} else {
 		// Bloom rejected everything — try category fallback only
-		results = e.categoryFallback(query, nil)
+		results = append(results, e.categoryFallback(query, nil)...)
 	}
 
 	// Sort by score descending
@@ -122,7 +186,14 @@ func (e *Engine) Search(query string) []Result {
 		results = results[:maxResults]
 	}
 
-	return results
+	// Copy out of pooled slice so we can return it to pool
+	out := make([]Result, len(results))
+	copy(out, results)
+
+	*pooled = results
+	e.putResults(pooled)
+
+	return out
 }
 
 // RecordSelection records a user selecting a product.
