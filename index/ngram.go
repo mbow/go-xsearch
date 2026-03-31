@@ -4,6 +4,7 @@ import (
 	"search/catalog"
 	"sort"
 	"strings"
+	"sync"
 )
 
 // ExtractTrigrams returns all overlapping 3-character substrings
@@ -75,6 +76,7 @@ type Index struct {
 	trigrams    map[int]map[string]struct{} // product ID -> set of its trigrams
 	catTrigrams map[string]map[string]struct{} // category name -> set of its trigrams
 	catProducts map[string][]int               // category name -> list of product IDs
+	hitsPool    sync.Pool                      // reusable []int16 hit counters
 }
 
 // Snapshot holds the serializable state of an index.
@@ -133,23 +135,27 @@ func FromSnapshot(s Snapshot, products []catalog.Product) *Index {
 		catTrigrams[cat] = m
 	}
 
+	n := len(products)
 	return &Index{
 		products:    products,
 		posting:     s.Posting,
 		trigrams:    trigrams,
 		catTrigrams: catTrigrams,
 		catProducts: s.CatProducts,
+		hitsPool:    sync.Pool{New: func() any { s := make([]int16, n); return &s }},
 	}
 }
 
 // NewIndex builds an n-gram inverted index from the given products.
 func NewIndex(products []catalog.Product) *Index {
+	n := len(products)
 	idx := &Index{
 		products:    products,
 		posting:     make(map[string][]int),
 		trigrams:    make(map[int]map[string]struct{}),
 		catTrigrams: make(map[string]map[string]struct{}),
 		catProducts: make(map[string][]int),
+		hitsPool:    sync.Pool{New: func() any { s := make([]int16, n); return &s }},
 	}
 
 	for id, p := range products {
@@ -196,39 +202,56 @@ func (idx *Index) Search(query string) []SearchResult {
 		return nil
 	}
 
-	// Build set of query trigrams
+	// Build set of unique query trigrams
 	querySet := make(map[string]struct{}, len(queryGrams))
 	for _, g := range queryGrams {
 		querySet[g] = struct{}{}
 	}
+	numQueryGrams := len(querySet)
 
-	// Union of all posting lists using bitset (single CPU instruction per set/test)
-	candidates := newBitset(len(idx.products))
-	for _, g := range queryGrams {
+	// Count trigram hits per candidate product using pooled array.
+	// Only products with enough hits are worth Jaccard-scoring.
+	hitsPtr := idx.hitsPool.Get().(*[]int16)
+	hits := *hitsPtr
+	// Track which IDs were touched so we only clear those (not the full 10k array)
+	var touched []int
+	for g := range querySet {
 		for _, id := range idx.posting[g] {
-			candidates.set(id)
+			if hits[id] == 0 {
+				touched = append(touched, id)
+			}
+			hits[id]++
 		}
 	}
 
-	// Score each candidate by Jaccard similarity
+	// Minimum hit threshold: at least 1/3 of query trigrams must match.
+	// This filters out noise from common trigrams at scale.
+	minHits := int16(1)
+	if numQueryGrams > 3 {
+		minHits = int16(numQueryGrams / 3)
+	}
+
+	// Score only candidates that pass the hit threshold
 	var results []SearchResult
-	candidates.forEach(func(id int) {
+	for _, id := range touched {
+		h := hits[id]
+		if h < minHits {
+			continue
+		}
 		productGrams := idx.trigrams[id]
 
-		// Intersection size
-		intersection := 0
-		for g := range querySet {
-			if _, ok := productGrams[g]; ok {
-				intersection++
-			}
-		}
-
-		// Union size
-		unionSize := len(querySet) + len(productGrams) - intersection
+		intersection := int(h)
+		unionSize := numQueryGrams + len(productGrams) - intersection
 
 		score := float64(intersection) / float64(unionSize)
 		results = append(results, SearchResult{ProductID: id, Score: score})
-	})
+	}
+
+	// Clear only touched entries and return to pool
+	for _, id := range touched {
+		hits[id] = 0
+	}
+	idx.hitsPool.Put(hitsPtr)
 
 	return results
 }
