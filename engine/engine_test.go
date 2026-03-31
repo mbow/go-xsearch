@@ -129,3 +129,53 @@ func TestSearchRecordAndRank(t *testing.T) {
 		t.Error("Nike Dunk Low should rank higher than Nike Air Max due to popularity")
 	}
 }
+
+func TestSearchBudRanking(t *testing.T) {
+	products := []catalog.Product{
+		{Name: "Budweiser", Category: "beer"},
+		{Name: "Bud Light", Category: "beer"},
+		{Name: "Funky Buddha Double Lambic", Category: "beer"},
+		{Name: "Funky Buddha Cask Kolsch", Category: "beer"},
+		{Name: "Funky Buddha Original Lambic", Category: "beer"},
+		{Name: "Funky Buddha Small Batch Lambic", Category: "beer"},
+		{Name: "Funky Buddha No. 12 Light Lager", Category: "beer"},
+		{Name: "Funky Buddha Original Light Lager", Category: "beer"},
+		{Name: "Funky Buddha No. 1 Brown Ale", Category: "beer"},
+		{Name: "Funky Buddha No. 5 Lager", Category: "beer"},
+		{Name: "Funky Buddha No. 12 Porter", Category: "beer"},
+		{Name: "Funky Buddha Limited Lambic", Category: "beer"},
+	}
+
+	e := New(products)
+	results := e.Search("bud")
+
+	if len(results) == 0 {
+		t.Fatal("expected results for 'bud'")
+	}
+
+	// First result must be Budweiser or Bud Light (prefix match on "bud")
+	firstName := results[0].Product.Name
+	if firstName != "Budweiser" && firstName != "Bud Light" {
+		t.Errorf("expected first result to be Budweiser or Bud Light, got %q", firstName)
+	}
+
+	// No Funky Buddha product should appear before all Bud* products
+	lastBudIdx := -1
+	firstFunkyIdx := -1
+	for i, r := range results {
+		name := r.Product.Name
+		if name == "Budweiser" || name == "Bud Light" {
+			lastBudIdx = i
+		}
+		if len(name) >= 5 && name[:5] == "Funky" && firstFunkyIdx == -1 {
+			firstFunkyIdx = i
+		}
+	}
+
+	if firstFunkyIdx != -1 && lastBudIdx > firstFunkyIdx {
+		t.Errorf("Funky Buddha (index %d) appeared before last Bud* product (index %d)", firstFunkyIdx, lastBudIdx)
+		for i, r := range results {
+			t.Logf("  result[%d]: %s (score=%.4f)", i, r.Product.Name, r.Score)
+		}
+	}
+}
