@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/mbow/go-xsearch/bm25"
 	"github.com/mbow/go-xsearch/bloom"
 	"github.com/mbow/go-xsearch/catalog"
 	"github.com/mbow/go-xsearch/index"
@@ -27,6 +28,7 @@ type Payload struct {
 	Products  []catalog.Product `cbor:"products"`
 	BloomSnap bloom.Snapshot    `cbor:"bloom"`
 	IndexSnap index.Snapshot    `cbor:"index"`
+	BM25Snap  bm25.Snapshot     `cbor:"bm25"`
 }
 
 const (
@@ -86,11 +88,16 @@ func run(inputPath, outputPath string) error {
 	}
 	bloomSnap := bf.ToSnapshot()
 
+	// Build the BM25 index
+	bm25Idx := bm25.NewIndex(products)
+	bm25Snap := bm25Idx.ToSnapshot()
+
 	// Build full payload
 	payload := Payload{
 		Products:  products,
 		BloomSnap: bloomSnap,
 		IndexSnap: indexSnap,
+		BM25Snap:  bm25Snap,
 	}
 
 	// Canonical CBOR for deterministic output
@@ -128,8 +135,8 @@ func run(inputPath, outputPath string) error {
 	fmt.Printf("  JSON: %d bytes -> CBOR: %d bytes -> gzip: %d bytes (%.0f%% total compression)\n",
 		len(jsonData), len(cborData), len(gzData),
 		(1-float64(len(gzData))/float64(len(jsonData)))*100)
-	fmt.Printf("  includes: pre-built bloom filter (%d bits) + n-gram index (%d posting lists)\n",
-		bloomSnap.Size, len(indexSnap.Posting))
+	fmt.Printf("  includes: pre-built bloom filter (%d bits) + n-gram index (%d posting lists) + BM25 index (%d terms)\n",
+		bloomSnap.Size, len(indexSnap.Posting), len(bm25Snap.Posting))
 
 	return nil
 }
