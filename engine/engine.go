@@ -63,13 +63,18 @@ func New(products []catalog.Product) *Engine {
 		},
 	}
 
-	// Populate Bloom filter with all product and category trigrams
+	// Populate Bloom filter with all product, category, and tag trigrams
 	for _, p := range products {
 		for _, g := range index.ExtractTrigrams(p.Name) {
 			e.bloom.Add(g)
 		}
 		for _, g := range index.ExtractTrigrams(p.Category) {
 			e.bloom.Add(g)
+		}
+		for _, tag := range p.Tags {
+			for _, g := range index.ExtractTrigrams(tag) {
+				e.bloom.Add(g)
+			}
 		}
 	}
 

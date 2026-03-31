@@ -65,14 +65,23 @@ func run(inputPath, outputPath string) error {
 	idx := index.NewIndex(products)
 	indexSnap := idx.ToSnapshot()
 
-	// Build the bloom filter
-	bf := bloom.New(bloomSize, bloomHashCount)
+	// Build the bloom filter (scale size with product count)
+	numBits := uint64(bloomSize)
+	if len(products) > 1000 {
+		numBits = uint64(len(products)) * 100 // ~100 bits per product for low FP rate
+	}
+	bf := bloom.New(numBits, bloomHashCount)
 	for _, p := range products {
 		for _, g := range index.ExtractTrigrams(p.Name) {
 			bf.Add(g)
 		}
 		for _, g := range index.ExtractTrigrams(p.Category) {
 			bf.Add(g)
+		}
+		for _, tag := range p.Tags {
+			for _, g := range index.ExtractTrigrams(tag) {
+				bf.Add(g)
+			}
 		}
 	}
 	bloomSnap := bf.ToSnapshot()

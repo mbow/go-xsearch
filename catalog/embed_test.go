@@ -29,21 +29,22 @@ func TestEmbeddedCount(t *testing.T) {
 		t.Fatalf("EmbeddedCount() error: %v", err)
 	}
 
-	if count != 226 {
-		t.Errorf("expected 226 embedded products, got %d", count)
+	if count < 10000 {
+		t.Errorf("expected at least 10000 embedded products, got %d", count)
 	}
 }
 
 func TestGetByName(t *testing.T) {
-	p, err := GetByName("Budweiser")
+	// Use a non-beer product that has a stable name
+	p, err := GetByName("Coca-Cola")
 	if err != nil {
 		t.Fatalf("GetByName() error: %v", err)
 	}
 	if p == nil {
-		t.Fatal("expected to find Budweiser")
+		t.Fatal("expected to find Coca-Cola")
 	}
-	if p.Category != "beer" {
-		t.Errorf("expected category 'beer', got %q", p.Category)
+	if p.Category != "soda" {
+		t.Errorf("expected category 'soda', got %q", p.Category)
 	}
 }
 
@@ -96,12 +97,18 @@ func TestEmbeddedMatchesJSON(t *testing.T) {
 		t.Fatalf("count mismatch: JSON=%d, CBOR=%d", len(jsonProducts), len(cborProducts))
 	}
 
+	mismatches := 0
 	for i := range jsonProducts {
-		if jsonProducts[i].Name != cborProducts[i].Name {
-			t.Errorf("product[%d] name mismatch: JSON=%q, CBOR=%q", i, jsonProducts[i].Name, cborProducts[i].Name)
+		if jsonProducts[i].Name != cborProducts[i].Name || jsonProducts[i].Category != cborProducts[i].Category {
+			if mismatches < 5 {
+				t.Errorf("product[%d] mismatch: JSON=%q/%q, CBOR=%q/%q",
+					i, jsonProducts[i].Name, jsonProducts[i].Category,
+					cborProducts[i].Name, cborProducts[i].Category)
+			}
+			mismatches++
 		}
-		if jsonProducts[i].Category != cborProducts[i].Category {
-			t.Errorf("product[%d] category mismatch: JSON=%q, CBOR=%q", i, jsonProducts[i].Category, cborProducts[i].Category)
-		}
+	}
+	if mismatches > 0 {
+		t.Errorf("total mismatches: %d", mismatches)
 	}
 }

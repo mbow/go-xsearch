@@ -154,6 +154,10 @@ func NewIndex(products []catalog.Product) *Index {
 
 	for id, p := range products {
 		grams := ExtractTrigrams(p.Name)
+		// Also index tags — each tag's trigrams become searchable
+		for _, tag := range p.Tags {
+			grams = append(grams, ExtractTrigrams(tag)...)
+		}
 		idx.trigrams[id] = make(map[string]struct{}, len(grams))
 		for _, g := range grams {
 			idx.trigrams[id][g] = struct{}{}

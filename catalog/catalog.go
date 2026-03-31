@@ -7,8 +7,9 @@ import (
 
 // Product represents a single item in the product catalog.
 type Product struct {
-	Name     string `json:"name" cbor:"name"`
-	Category string `json:"category" cbor:"category"`
+	Name     string   `json:"name" cbor:"name"`
+	Category string   `json:"category" cbor:"category"`
+	Tags     []string `json:"tags,omitempty" cbor:"tags,omitempty"`
 }
 
 // LoadProducts reads a JSON file and returns a slice of products.
