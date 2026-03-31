@@ -7,8 +7,11 @@
 package bm25
 
 import (
+	"math"
 	"strings"
 	"unicode"
+
+	"github.com/mbow/go-xsearch/catalog"
 )
 
 const (
@@ -63,4 +66,73 @@ func hasAlphanumeric(s string) bool {
 		}
 	}
 	return false
+}
+
+// NewIndex builds a BM25 index from the given product catalog.
+//
+// It tokenizes each product's Name, Category, and Tags into a single document,
+// computes term frequencies, document lengths, posting lists, IDF values,
+// and word prefixes (from product names only).
+func NewIndex(products []catalog.Product) *Index {
+	n := len(products)
+	idx := &Index{
+		idf:          make(map[string]float64),
+		termFreqs:    make([]map[string]int, n),
+		docLens:      make([]int, n),
+		wordPrefixes: make([]map[string]struct{}, n),
+		posting:      make(map[string][]int),
+		k1:           DefaultK1,
+		b:            DefaultB,
+	}
+
+	// df tracks how many documents contain each term.
+	df := make(map[string]int)
+	totalLen := 0
+
+	for i, p := range products {
+		// Tokenize full document: Name + Category + Tags.
+		doc := p.Name + " " + p.Category
+		if len(p.Tags) > 0 {
+			doc += " " + strings.Join(p.Tags, " ")
+		}
+		tokens := Tokenize(doc)
+
+		// Term frequencies for this document.
+		tf := make(map[string]int, len(tokens))
+		for _, tok := range tokens {
+			tf[tok]++
+		}
+		idx.termFreqs[i] = tf
+		idx.docLens[i] = len(tokens)
+		totalLen += len(tokens)
+
+		// Posting lists and document frequency.
+		for term := range tf {
+			idx.posting[term] = append(idx.posting[term], i)
+			df[term]++
+		}
+
+		// Word prefixes from product NAME only.
+		nameTokens := Tokenize(p.Name)
+		prefixes := make(map[string]struct{})
+		for _, word := range nameTokens {
+			runes := []rune(word)
+			for length := 1; length <= len(runes); length++ {
+				prefixes[string(runes[:length])] = struct{}{}
+			}
+		}
+		idx.wordPrefixes[i] = prefixes
+	}
+
+	// Average document length.
+	if n > 0 {
+		idx.avgDocLen = float64(totalLen) / float64(n)
+	}
+
+	// IDF: log((N - df + 0.5) / (df + 0.5) + 1)
+	for term, d := range df {
+		idx.idf[term] = math.Log((float64(n)-float64(d)+0.5)/(float64(d)+0.5) + 1)
+	}
+
+	return idx
 }
