@@ -207,6 +207,32 @@ func BenchmarkEngineSearch_WithPopularity(b *testing.B) {
 	}
 }
 
+// --- BM25 path benchmarks ---
+
+func BenchmarkEngineSearch_BM25Path(b *testing.B) {
+	e := benchEngine(b)
+	b.ResetTimer()
+	for b.Loop() {
+		e.Search("budweiser")
+	}
+}
+
+func BenchmarkEngineSearch_JaccardFallback(b *testing.B) {
+	e := benchEngine(b)
+	b.ResetTimer()
+	for b.Loop() {
+		e.Search("budwiser")
+	}
+}
+
+func BenchmarkEngineSearch_PrefixBoost(b *testing.B) {
+	e := benchEngine(b)
+	b.ResetTimer()
+	for b.Loop() {
+		e.Search("bud")
+	}
+}
+
 // --- HTTP handler benchmarks (full round-trip minus network) ---
 
 func BenchmarkHTTPSearch_ColdCache(b *testing.B) {
