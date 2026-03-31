@@ -2,6 +2,7 @@ package index
 
 import (
 	"search/catalog"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -209,18 +210,43 @@ func (idx *Index) Search(query string) []SearchResult {
 	}
 	numQueryGrams := len(querySet)
 
+	// Sort query trigrams by posting list size (rarest first).
+	// This dramatically reduces work: we seed candidates from the smallest
+	// posting list, then only check those candidates against larger lists.
+	type gramEntry struct {
+		gram string
+		size int
+	}
+	sorted := make([]gramEntry, 0, numQueryGrams)
+	for g := range querySet {
+		sorted = append(sorted, gramEntry{g, len(idx.posting[g])})
+	}
+	slices.SortFunc(sorted, func(a, b gramEntry) int {
+		return a.size - b.size
+	})
+
 	// Count trigram hits per candidate product using pooled array.
-	// Only products with enough hits are worth Jaccard-scoring.
 	hitsPtr := idx.hitsPool.Get().(*[]int16)
 	hits := *hitsPtr
-	// Track which IDs were touched so we only clear those (not the full 10k array)
+	// Seed candidates from the rarest trigram, then expand only from
+	// small posting lists. Large posting lists only update existing candidates.
+	const maxPostingExpand = 200 // only add new candidates from small posting lists
+	const maxCandidates = 500   // stop expanding candidates after this many
 	var touched []int
-	for g := range querySet {
-		for _, id := range idx.posting[g] {
-			if hits[id] == 0 {
+	for _, id := range idx.posting[sorted[0].gram] {
+		hits[id]++
+		touched = append(touched, id)
+	}
+	for i := 1; i < len(sorted); i++ {
+		posting := idx.posting[sorted[i].gram]
+		expand := len(posting) <= maxPostingExpand && len(touched) < maxCandidates
+		for _, id := range posting {
+			if hits[id] > 0 {
+				hits[id]++
+			} else if expand {
+				hits[id]++
 				touched = append(touched, id)
 			}
-			hits[id]++
 		}
 	}
 
