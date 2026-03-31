@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"fmt"
 	"search/bloom"
 	"search/catalog"
 	"search/index"
@@ -8,6 +9,8 @@ import (
 	"sort"
 	"strings"
 	"sync"
+
+	"github.com/fxamacker/cbor/v2"
 )
 
 // MatchType indicates how a result was found.
@@ -73,6 +76,34 @@ func New(products []catalog.Product) *Engine {
 	e.buildPrefixCache()
 
 	return e
+}
+
+// NewFromEmbedded creates an engine using pre-built bloom filter and index
+// deserialized from raw CBOR bytes. Skips index construction entirely.
+func NewFromEmbedded(products []catalog.Product, bloomRaw, indexRaw []byte) (*Engine, error) {
+	var bs bloom.Snapshot
+	if err := cbor.Unmarshal(bloomRaw, &bs); err != nil {
+		return nil, fmt.Errorf("unmarshaling bloom snapshot: %w", err)
+	}
+
+	var is index.Snapshot
+	if err := cbor.Unmarshal(indexRaw, &is); err != nil {
+		return nil, fmt.Errorf("unmarshaling index snapshot: %w", err)
+	}
+
+	e := &Engine{
+		products: products,
+		bloom:    bloom.FromSnapshot(bs),
+		index:    index.FromSnapshot(is, products),
+		ranker:   ranking.New(lambda, alpha),
+		resultPool: sync.Pool{
+			New: func() any { s := make([]Result, 0, maxResults); return &s },
+		},
+	}
+
+	e.buildPrefixCache()
+
+	return e, nil
 }
 
 // buildPrefixCache precomputes search results for every 1-char and 2-char

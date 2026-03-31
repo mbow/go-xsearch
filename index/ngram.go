@@ -77,6 +77,71 @@ type Index struct {
 	catProducts map[string][]int               // category name -> list of product IDs
 }
 
+// Snapshot holds the serializable state of an index.
+type Snapshot struct {
+	Posting     map[string][]int            `cbor:"posting"`
+	Trigrams    map[int][]string            `cbor:"trigrams"`     // flattened from map[int]map[string]struct{}
+	CatTrigrams map[string][]string         `cbor:"cat_trigrams"` // flattened
+	CatProducts map[string][]int            `cbor:"cat_products"`
+}
+
+// ToSnapshot exports the index state for serialization.
+func (idx *Index) ToSnapshot() Snapshot {
+	tris := make(map[int][]string, len(idx.trigrams))
+	for id, grams := range idx.trigrams {
+		s := make([]string, 0, len(grams))
+		for g := range grams {
+			s = append(s, g)
+		}
+		tris[id] = s
+	}
+
+	catTris := make(map[string][]string, len(idx.catTrigrams))
+	for cat, grams := range idx.catTrigrams {
+		s := make([]string, 0, len(grams))
+		for g := range grams {
+			s = append(s, g)
+		}
+		catTris[cat] = s
+	}
+
+	return Snapshot{
+		Posting:     idx.posting,
+		Trigrams:    tris,
+		CatTrigrams: catTris,
+		CatProducts: idx.catProducts,
+	}
+}
+
+// FromSnapshot restores an index from serialized state plus the product list.
+func FromSnapshot(s Snapshot, products []catalog.Product) *Index {
+	trigrams := make(map[int]map[string]struct{}, len(s.Trigrams))
+	for id, grams := range s.Trigrams {
+		m := make(map[string]struct{}, len(grams))
+		for _, g := range grams {
+			m[g] = struct{}{}
+		}
+		trigrams[id] = m
+	}
+
+	catTrigrams := make(map[string]map[string]struct{}, len(s.CatTrigrams))
+	for cat, grams := range s.CatTrigrams {
+		m := make(map[string]struct{}, len(grams))
+		for _, g := range grams {
+			m[g] = struct{}{}
+		}
+		catTrigrams[cat] = m
+	}
+
+	return &Index{
+		products:    products,
+		posting:     s.Posting,
+		trigrams:    trigrams,
+		catTrigrams: catTrigrams,
+		catProducts: s.CatProducts,
+	}
+}
+
 // NewIndex builds an n-gram inverted index from the given products.
 func NewIndex(products []catalog.Product) *Index {
 	idx := &Index{

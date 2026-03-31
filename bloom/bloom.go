@@ -30,6 +30,23 @@ type Filter struct {
 	k    int
 }
 
+// Snapshot holds the serializable state of a Bloom filter.
+type Snapshot struct {
+	Bits []uint64 `cbor:"bits"`
+	Size uint64   `cbor:"size"`
+	K    int      `cbor:"k"`
+}
+
+// ToSnapshot exports the filter state for serialization.
+func (f *Filter) ToSnapshot() Snapshot {
+	return Snapshot{Bits: f.bits, Size: f.size, K: f.k}
+}
+
+// FromSnapshot restores a Bloom filter from serialized state.
+func FromSnapshot(s Snapshot) *Filter {
+	return &Filter{bits: s.Bits, size: s.Size, k: s.K}
+}
+
 // New creates a Bloom filter with the given number of bits and hash count.
 func New(numBits uint64, k int) *Filter {
 	// Round up to multiple of 64

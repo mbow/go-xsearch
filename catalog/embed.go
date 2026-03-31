@@ -13,12 +13,21 @@ import (
 //go:embed data.cbor
 var rawCBOR []byte
 
+// payload is the full serialized dataset from the generator.
+// BloomRaw and IndexRaw are kept as raw CBOR bytes to avoid importing
+// bloom/index packages (which would create an import cycle).
+type payload struct {
+	Products []Product       `cbor:"products"`
+	BloomRaw cbor.RawMessage `cbor:"bloom"`
+	IndexRaw cbor.RawMessage `cbor:"index"`
+}
+
 var (
-	embeddedProducts []Product
-	productsByName   map[string]*Product
-	productsByID     map[int]*Product
-	initOnce         sync.Once
-	initErr          error
+	decoded        payload
+	productsByName map[string]*Product
+	productsByID   map[int]*Product
+	initOnce       sync.Once
+	initErr        error
 )
 
 func initEmbedded() {
@@ -28,28 +37,47 @@ func initEmbedded() {
 			return
 		}
 
-		if err := cbor.Unmarshal(rawCBOR, &embeddedProducts); err != nil {
+		if err := cbor.Unmarshal(rawCBOR, &decoded); err != nil {
 			initErr = fmt.Errorf("catalog: unmarshaling CBOR: %w", err)
 			return
 		}
 
-		productsByName = make(map[string]*Product, len(embeddedProducts))
-		productsByID = make(map[int]*Product, len(embeddedProducts))
-		for i := range embeddedProducts {
-			productsByName[embeddedProducts[i].Name] = &embeddedProducts[i]
-			productsByID[i] = &embeddedProducts[i]
+		productsByName = make(map[string]*Product, len(decoded.Products))
+		productsByID = make(map[int]*Product, len(decoded.Products))
+		for i := range decoded.Products {
+			productsByName[decoded.Products[i].Name] = &decoded.Products[i]
+			productsByID[i] = &decoded.Products[i]
 		}
 	})
 }
 
 // EmbeddedProducts returns all products from the compiled-in CBOR data.
-// This is a zero-cost lookup after the first call — no file I/O, no parsing.
 func EmbeddedProducts() ([]Product, error) {
 	initEmbedded()
 	if initErr != nil {
 		return nil, initErr
 	}
-	return embeddedProducts, nil
+	return decoded.Products, nil
+}
+
+// EmbeddedBloomRaw returns the raw CBOR bytes of the pre-built Bloom filter snapshot.
+// The caller (engine) unmarshals this into bloom.Snapshot.
+func EmbeddedBloomRaw() ([]byte, error) {
+	initEmbedded()
+	if initErr != nil {
+		return nil, initErr
+	}
+	return []byte(decoded.BloomRaw), nil
+}
+
+// EmbeddedIndexRaw returns the raw CBOR bytes of the pre-built n-gram index snapshot.
+// The caller (engine) unmarshals this into index.Snapshot.
+func EmbeddedIndexRaw() ([]byte, error) {
+	initEmbedded()
+	if initErr != nil {
+		return nil, initErr
+	}
+	return []byte(decoded.IndexRaw), nil
 }
 
 // GetByName looks up a product by exact name. Returns nil if not found.
@@ -58,10 +86,7 @@ func GetByName(name string) (*Product, error) {
 	if initErr != nil {
 		return nil, initErr
 	}
-	p, ok := productsByName[name]
-	if !ok {
-		return nil, nil
-	}
+	p := productsByName[name]
 	return p, nil
 }
 
@@ -71,10 +96,7 @@ func GetByID(id int) (*Product, error) {
 	if initErr != nil {
 		return nil, initErr
 	}
-	p, ok := productsByID[id]
-	if !ok {
-		return nil, nil
-	}
+	p := productsByID[id]
 	return p, nil
 }
 
@@ -84,5 +106,5 @@ func EmbeddedCount() (int, error) {
 	if initErr != nil {
 		return 0, initErr
 	}
-	return len(embeddedProducts), nil
+	return len(decoded.Products), nil
 }

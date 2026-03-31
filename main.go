@@ -152,15 +152,33 @@ func (app *App) startSnapshots(interval time.Duration) {
 func main() {
 	dataDir := "data"
 
-	// Load products from compiled-in CBOR data (no file I/O at startup)
+	// Load products + pre-built index from compiled-in CBOR data (no file I/O)
 	products, err := catalog.EmbeddedProducts()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error loading embedded products: %v\n", err)
 		os.Exit(1)
 	}
 
+	bloomRaw, err := catalog.EmbeddedBloomRaw()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error loading embedded bloom: %v\n", err)
+		os.Exit(1)
+	}
+
+	indexRaw, err := catalog.EmbeddedIndexRaw()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error loading embedded index: %v\n", err)
+		os.Exit(1)
+	}
+
+	eng, err := engine.NewFromEmbedded(products, bloomRaw, indexRaw)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error creating engine: %v\n", err)
+		os.Exit(1)
+	}
+
 	app := &App{
-		engine:  engine.New(products),
+		engine:  eng,
 		dataDir: dataDir,
 		cache:   newFragmentCache(1024),
 	}
