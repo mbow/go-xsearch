@@ -27,6 +27,47 @@ type SearchResult struct {
 	Score     float64
 }
 
+// bitset is a compact set of product IDs backed by a uint64 slice.
+// Set/test operations are single CPU instructions instead of map hash+lookup.
+type bitset struct {
+	words []uint64
+	size  int
+}
+
+func newBitset(n int) bitset {
+	return bitset{
+		words: make([]uint64, (n+63)/64),
+		size:  n,
+	}
+}
+
+func (b *bitset) set(i int)      { b.words[i/64] |= 1 << (uint(i) % 64) }
+func (b *bitset) test(i int) bool { return b.words[i/64]&(1<<(uint(i)%64)) != 0 }
+
+// forEach calls fn for each set bit.
+func (b *bitset) forEach(fn func(int)) {
+	for w := range b.words {
+		bits := b.words[w]
+		base := w * 64
+		for bits != 0 {
+			tz := bits & -bits       // isolate lowest set bit
+			pos := base + popcount64minus1(tz)
+			fn(pos)
+			bits &= bits - 1 // clear lowest set bit
+		}
+	}
+}
+
+// popcount64minus1 returns the bit position of a single set bit (power of 2).
+func popcount64minus1(v uint64) int {
+	// de Bruijn sequence for bit position lookup
+	pos := 0
+	for v >>= 1; v != 0; v >>= 1 {
+		pos++
+	}
+	return pos
+}
+
 // Index is an n-gram inverted index over a product catalog.
 type Index struct {
 	products    []catalog.Product
@@ -92,17 +133,17 @@ func (idx *Index) Search(query string) []SearchResult {
 		querySet[g] = struct{}{}
 	}
 
-	// Union of all posting lists
-	candidates := make(map[int]struct{})
+	// Union of all posting lists using bitset (single CPU instruction per set/test)
+	candidates := newBitset(len(idx.products))
 	for _, g := range queryGrams {
 		for _, id := range idx.posting[g] {
-			candidates[id] = struct{}{}
+			candidates.set(id)
 		}
 	}
 
 	// Score each candidate by Jaccard similarity
-	results := make([]SearchResult, 0, len(candidates))
-	for id := range candidates {
+	var results []SearchResult
+	candidates.forEach(func(id int) {
 		productGrams := idx.trigrams[id]
 
 		// Intersection size
@@ -118,7 +159,7 @@ func (idx *Index) Search(query string) []SearchResult {
 
 		score := float64(intersection) / float64(unionSize)
 		results = append(results, SearchResult{ProductID: id, Score: score})
-	}
+	})
 
 	return results
 }
