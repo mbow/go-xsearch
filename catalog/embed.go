@@ -3,8 +3,11 @@
 package catalog
 
 import (
+	"bytes"
+	"compress/gzip"
 	_ "embed"
 	"fmt"
+	"io"
 	"sync"
 
 	"github.com/fxamacker/cbor/v2"
@@ -37,7 +40,20 @@ func initEmbedded() {
 			return
 		}
 
-		if err := cbor.Unmarshal(rawCBOR, &decoded); err != nil {
+		// Decompress gzip
+		gzReader, err := gzip.NewReader(bytes.NewReader(rawCBOR))
+		if err != nil {
+			initErr = fmt.Errorf("catalog: decompressing gzip: %w", err)
+			return
+		}
+		cborData, err := io.ReadAll(gzReader)
+		if err != nil {
+			initErr = fmt.Errorf("catalog: reading gzip: %w", err)
+			return
+		}
+		gzReader.Close()
+
+		if err := cbor.Unmarshal(cborData, &decoded); err != nil {
 			initErr = fmt.Errorf("catalog: unmarshaling CBOR: %w", err)
 			return
 		}

@@ -8,6 +8,8 @@
 package main
 
 import (
+	"bytes"
+	"compress/gzip"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -95,13 +97,28 @@ func run(inputPath, outputPath string) error {
 		return fmt.Errorf("marshaling to CBOR: %w", err)
 	}
 
-	if err := os.WriteFile(outputPath, cborData, 0644); err != nil {
+	// Gzip compress the CBOR data
+	var gzBuf bytes.Buffer
+	gzWriter, err := gzip.NewWriterLevel(&gzBuf, gzip.BestCompression)
+	if err != nil {
+		return fmt.Errorf("creating gzip writer: %w", err)
+	}
+	if _, err := gzWriter.Write(cborData); err != nil {
+		return fmt.Errorf("gzip compressing: %w", err)
+	}
+	if err := gzWriter.Close(); err != nil {
+		return fmt.Errorf("closing gzip writer: %w", err)
+	}
+	gzData := gzBuf.Bytes()
+
+	if err := os.WriteFile(outputPath, gzData, 0644); err != nil {
 		return fmt.Errorf("writing %s: %w", outputPath, err)
 	}
 
-	fmt.Printf("generated %s: %d products, %d bytes JSON -> %d bytes CBOR (%.0f%% smaller)\n",
-		outputPath, len(products), len(jsonData), len(cborData),
-		(1-float64(len(cborData))/float64(len(jsonData)))*100)
+	fmt.Printf("generated %s: %d products\n", outputPath, len(products))
+	fmt.Printf("  JSON: %d bytes -> CBOR: %d bytes -> gzip: %d bytes (%.0f%% total compression)\n",
+		len(jsonData), len(cborData), len(gzData),
+		(1-float64(len(gzData))/float64(len(jsonData)))*100)
 	fmt.Printf("  includes: pre-built bloom filter (%d bits) + n-gram index (%d posting lists)\n",
 		bloomSnap.Size, len(indexSnap.Posting))
 
