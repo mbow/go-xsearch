@@ -116,12 +116,17 @@ func NewFromEmbedded(products []catalog.Product, bloomRaw, indexRaw, bm25Raw []b
 		return nil, fmt.Errorf("unmarshaling bm25 snapshot: %w", err)
 	}
 
+	bm25Idx, err := bm25.FromSnapshot(bm25s)
+	if err != nil {
+		return nil, fmt.Errorf("restoring bm25 index: %w", err)
+	}
+
 	e := &Engine{
 		products: products,
 		bloom:    bloom.FromSnapshot(bs),
 		index:    index.FromSnapshot(is, products),
 		ranker:   ranking.New(lambda, alpha),
-		bm25idx:  bm25.FromSnapshot(bm25s),
+		bm25idx:  bm25Idx,
 		resultPool: sync.Pool{
 			New: func() any { s := make([]Result, 0, maxResults); return &s },
 		},
@@ -317,15 +322,16 @@ func (e *Engine) buildBM25Results(bm25Results []bm25.SearchResult, score scorerF
 			Score:     combined,
 			MatchType: MatchDirect,
 		})
-
-		if len(results) >= maxResults {
-			break
-		}
 	}
 
+	// Sort by combined score (popularity may reorder BM25 ranking)
 	slices.SortFunc(results, func(a, b Result) int {
 		return cmp.Compare(b.Score, a.Score)
 	})
+
+	if len(results) > maxResults {
+		results = results[:maxResults]
+	}
 
 	return results
 }

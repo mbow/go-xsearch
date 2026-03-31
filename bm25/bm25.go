@@ -7,6 +7,8 @@
 package bm25
 
 import (
+	"cmp"
+	"fmt"
 	"math"
 	"slices"
 	"strings"
@@ -146,7 +148,11 @@ func NewIndex(products []catalog.Product) *Index {
 }
 
 // Score computes the BM25 score for a single product against the given query terms.
+// productID must be in [0, len(products)) or Score returns 0.
 func (idx *Index) Score(productID int, queryTerms []string) float64 {
+	if productID < 0 || productID >= len(idx.termFreqs) {
+		return 0
+	}
 	tf := idx.termFreqs[productID]
 	dl := float64(idx.docLens[productID])
 	var score float64
@@ -166,7 +172,11 @@ func (idx *Index) Score(productID int, queryTerms []string) float64 {
 
 // HasPrefixMatch reports whether any query term exists in the product's
 // word-prefix set (built from product name words).
+// productID must be in [0, len(products)) or HasPrefixMatch returns false.
 func (idx *Index) HasPrefixMatch(productID int, queryTerms []string) bool {
+	if productID < 0 || productID >= len(idx.wordPrefixes) {
+		return false
+	}
 	prefixes := idx.wordPrefixes[productID]
 	for _, term := range queryTerms {
 		if _, ok := prefixes[term]; ok {
@@ -227,13 +237,10 @@ func (idx *Index) Search(query string) []SearchResult {
 
 	// Sort by score descending, then by ProductID ascending as tiebreaker.
 	slices.SortFunc(results, func(a, b SearchResult) int {
-		if a.Score > b.Score {
-			return -1
+		if c := cmp.Compare(b.Score, a.Score); c != 0 {
+			return c
 		}
-		if a.Score < b.Score {
-			return 1
-		}
-		return a.ProductID - b.ProductID
+		return cmp.Compare(a.ProductID, b.ProductID)
 	})
 
 	return results
@@ -279,8 +286,15 @@ func (idx *Index) ToSnapshot() Snapshot {
 
 // FromSnapshot restores an Index from a Snapshot.
 // Word prefix string slices are converted back to sets.
-func FromSnapshot(s Snapshot) *Index {
-	wp := make([]map[string]struct{}, len(s.WordPrefixes))
+// Returns an error if the snapshot has inconsistent slice lengths.
+func FromSnapshot(s Snapshot) (*Index, error) {
+	n := len(s.TermFreqs)
+	if len(s.DocLens) != n || len(s.WordPrefixes) != n {
+		return nil, fmt.Errorf("bm25: snapshot length mismatch: termFreqs=%d, docLens=%d, wordPrefixes=%d",
+			n, len(s.DocLens), len(s.WordPrefixes))
+	}
+
+	wp := make([]map[string]struct{}, n)
 	for i, list := range s.WordPrefixes {
 		m := make(map[string]struct{}, len(list))
 		for _, k := range list {
@@ -298,5 +312,5 @@ func FromSnapshot(s Snapshot) *Index {
 		posting:       s.Posting,
 		k1:            s.K1,
 		b:             s.B,
-	}
+	}, nil
 }

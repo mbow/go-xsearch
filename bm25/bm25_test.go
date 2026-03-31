@@ -162,7 +162,10 @@ func TestSnapshotRoundTrip(t *testing.T) {
 
 	// Snapshot and restore.
 	snap := idx.ToSnapshot()
-	restored := FromSnapshot(snap)
+	restored, err := FromSnapshot(snap)
+	if err != nil {
+		t.Fatalf("FromSnapshot: %v", err)
+	}
 
 	// Search restored index for "bud" and compare.
 	restoredResults := restored.Search("bud")
@@ -189,6 +192,7 @@ func TestSnapshotRoundTrip(t *testing.T) {
 func BenchmarkBM25Score(b *testing.B) {
 	idx := NewIndex(testProducts())
 	terms := Tokenize("budweiser")
+	b.ResetTimer()
 	for b.Loop() {
 		idx.Score(0, terms)
 	}
@@ -196,6 +200,7 @@ func BenchmarkBM25Score(b *testing.B) {
 
 func BenchmarkBM25Search(b *testing.B) {
 	idx := NewIndex(testProducts())
+	b.ResetTimer()
 	for b.Loop() {
 		idx.Search("budweiser")
 	}
@@ -203,6 +208,7 @@ func BenchmarkBM25Search(b *testing.B) {
 
 func BenchmarkBM25Search_PrefixBoost(b *testing.B) {
 	idx := NewIndex(testProducts())
+	b.ResetTimer()
 	for b.Loop() {
 		idx.Search("bud")
 	}
@@ -211,7 +217,8 @@ func BenchmarkBM25Search_PrefixBoost(b *testing.B) {
 func BenchmarkBM25FromSnapshot(b *testing.B) {
 	idx := NewIndex(testProducts())
 	snap := idx.ToSnapshot()
+	b.ResetTimer()
 	for b.Loop() {
-		FromSnapshot(snap)
+		_, _ = FromSnapshot(snap)
 	}
 }
