@@ -2,13 +2,13 @@
   <img src="docs/logo.png" alt="Search Logo" width="200" />
 </div>
 
-# Search
+# go-xsearch
 
 A fast, zero-dependency** autocomplete search engine built with Go and HTMX. (**
 requires CBOR but can be removed for fast start times but not required for all
 use cases)
 
-<video src="https://github.com/mbow/go-xsearch/raw/main/docs/demo.webm" autoplay loop muted playsinline width="100%"></video>
+<video src="docs/demo.webm" autoplay loop muted playsinline width="100%"></video>
 
 <!-- Record a video of the search UI in action and save to docs/demo.webm -->
 
