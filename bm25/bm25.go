@@ -8,6 +8,7 @@ package bm25
 
 import (
 	"math"
+	"slices"
 	"strings"
 	"unicode"
 
@@ -135,4 +136,104 @@ func NewIndex(products []catalog.Product) *Index {
 	}
 
 	return idx
+}
+
+// Score computes the BM25 score for a single product against the given query terms.
+func (idx *Index) Score(productID int, queryTerms []string) float64 {
+	tf := idx.termFreqs[productID]
+	dl := float64(idx.docLens[productID])
+	var score float64
+	for _, term := range queryTerms {
+		idf, ok := idx.idf[term]
+		if !ok {
+			continue
+		}
+		f := float64(tf[term])
+		if f == 0 {
+			continue
+		}
+		score += idf * (f * (idx.k1 + 1)) / (f + idx.k1*(1-idx.b+idx.b*dl/idx.avgDocLen))
+	}
+	return score
+}
+
+// HasPrefixMatch reports whether any query term exists in the product's
+// word-prefix set (built from product name words).
+func (idx *Index) HasPrefixMatch(productID int, queryTerms []string) bool {
+	prefixes := idx.wordPrefixes[productID]
+	for _, term := range queryTerms {
+		if _, ok := prefixes[term]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+// Search performs a full BM25 search with prefix boosting and returns results
+// sorted by descending score.
+func (idx *Index) Search(query string) []SearchResult {
+	queryTerms := Tokenize(query)
+	if len(queryTerms) == 0 {
+		return nil
+	}
+
+	// Collect candidates from posting lists.
+	seen := make(map[int]struct{})
+	for _, term := range queryTerms {
+		for _, id := range idx.posting[term] {
+			seen[id] = struct{}{}
+		}
+	}
+
+	// Also collect candidates via prefix matching (scan all products).
+	// If posting lists found candidates, prefix matches still contribute
+	// additional candidates that receive a prefix bonus score.
+	for id := range idx.wordPrefixes {
+		if idx.HasPrefixMatch(id, queryTerms) {
+			seen[id] = struct{}{}
+		}
+	}
+
+	if len(seen) == 0 {
+		return nil
+	}
+
+	// Compute maxIDF across query terms (default 1.0 if none found).
+	maxIDF := 1.0
+	for _, term := range queryTerms {
+		if idf, ok := idx.idf[term]; ok && idf > maxIDF {
+			maxIDF = idf
+		}
+	}
+	prefixBonus := 0.5 * maxIDF
+
+	// Score each candidate.
+	results := make([]SearchResult, 0, len(seen))
+	for id := range seen {
+		score := idx.Score(id, queryTerms)
+		pm := idx.HasPrefixMatch(id, queryTerms)
+		if pm {
+			score += prefixBonus
+		}
+		if score > 0 {
+			results = append(results, SearchResult{
+				ProductID:   id,
+				Score:       score,
+				PrefixMatch: pm,
+			})
+		}
+	}
+
+	// Sort by score descending.
+	slices.SortFunc(results, func(a, b SearchResult) int {
+		if a.Score > b.Score {
+			return -1
+		}
+		if a.Score < b.Score {
+			return 1
+		}
+		return 0
+	})
+
+	return results
 }

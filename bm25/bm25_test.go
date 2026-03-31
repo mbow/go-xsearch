@@ -82,3 +82,71 @@ func TestNewIndex(t *testing.T) {
 		t.Error("expected wordPrefixes[2] NOT to contain 'budweiser'")
 	}
 }
+
+func TestScore(t *testing.T) {
+	idx := NewIndex(testProducts())
+	terms := Tokenize("budweiser")
+
+	// Budweiser (product 0) should score positive for "budweiser"
+	score0 := idx.Score(0, terms)
+	if score0 <= 0 {
+		t.Errorf("expected positive score for Budweiser, got %f", score0)
+	}
+
+	// Funky Buddha (product 2) should score 0 for "budweiser"
+	score2 := idx.Score(2, terms)
+	if score2 != 0 {
+		t.Errorf("expected 0 score for Funky Buddha on 'budweiser', got %f", score2)
+	}
+}
+
+func TestSearch(t *testing.T) {
+	idx := NewIndex(testProducts())
+	results := idx.Search("budweiser")
+
+	if len(results) == 0 {
+		t.Fatal("expected results for 'budweiser'")
+	}
+	if results[0].ProductID != 0 {
+		t.Errorf("expected product 0 (Budweiser) first, got product %d", results[0].ProductID)
+	}
+}
+
+func TestSearch_PrefixBoost(t *testing.T) {
+	idx := NewIndex(testProducts())
+	results := idx.Search("bud")
+
+	if len(results) < 2 {
+		t.Fatalf("expected at least 2 results for 'bud', got %d", len(results))
+	}
+
+	// Budweiser and Bud Light should appear in the results with PrefixMatch
+	topIDs := make(map[int]bool)
+	for _, r := range results[:2] {
+		topIDs[r.ProductID] = true
+		if !r.PrefixMatch {
+			t.Errorf("expected PrefixMatch=true for product %d", r.ProductID)
+		}
+	}
+	if !topIDs[0] || !topIDs[1] {
+		t.Errorf("expected products 0 (Budweiser) and 1 (Bud Light) in top 2, got %v", results[:2])
+	}
+}
+
+func TestSearch_NoResults(t *testing.T) {
+	idx := NewIndex(testProducts())
+	results := idx.Search("xyzzyplugh")
+
+	if len(results) != 0 {
+		t.Errorf("expected no results for gibberish, got %d", len(results))
+	}
+}
+
+func TestSearch_Empty(t *testing.T) {
+	idx := NewIndex(testProducts())
+	results := idx.Search("")
+
+	if results != nil {
+		t.Errorf("expected nil for empty query, got %v", results)
+	}
+}
