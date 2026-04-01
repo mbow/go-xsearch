@@ -28,6 +28,8 @@
             padding: 10px 12px; border-bottom: 1px solid #eee; cursor: pointer;
         }
         .result-item:hover { background: #f5f5f5; }
+        .result-item.active { background: #e8f0fe; }
+        .result-item { transition: background 0.1s; }
         .result-name { font-weight: 500; }
         .result-category { color: #666; font-size: 14px; }
         .result-section { padding: 8px 12px; color: #888; font-size: 13px; font-weight: 600; background: #f9f9f9; }
@@ -55,8 +57,11 @@
     </div>
     <div id="results"></div>
     <script>
+    var activeIdx = -1;
+
     document.body.addEventListener('htmx:afterSwap', function(evt) {
         if (evt.detail.target.id !== 'results') return;
+        activeIdx = -1;
         var inner = document.getElementById('results-inner');
         var ghost = document.getElementById('ghost');
         var input = document.getElementById('search-input');
@@ -64,6 +69,47 @@
         var suffix = inner.getAttribute('data-ghost') || '';
         ghost.textContent = input.value + suffix;
     });
+
+    document.getElementById('search-input').addEventListener('keydown', function(e) {
+        var items = document.querySelectorAll('.result-item');
+
+        if (e.key === 'Tab') {
+            var ghost = document.getElementById('ghost');
+            if (ghost.textContent && ghost.textContent !== this.value) {
+                e.preventDefault();
+                this.value = ghost.textContent;
+                htmx.trigger(this, 'search');
+            }
+            return;
+        }
+
+        if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            activeIdx = Math.min(activeIdx + 1, items.length - 1);
+            updateActive(items);
+        } else if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            activeIdx = Math.max(activeIdx - 1, -1);
+            updateActive(items);
+        } else if (e.key === 'Enter' && activeIdx >= 0 && activeIdx < items.length) {
+            e.preventDefault();
+            var item = items[activeIdx];
+            var nameEl = item.querySelector('.result-name');
+            if (nameEl) this.value = nameEl.textContent;
+            htmx.trigger(item, 'click');
+            activeIdx = -1;
+            updateActive(items);
+        } else if (e.key === 'Escape') {
+            activeIdx = -1;
+            updateActive(items);
+        }
+    });
+
+    function updateActive(items) {
+        items.forEach(function(el, i) {
+            el.classList.toggle('active', i === activeIdx);
+        });
+    }
     </script>
 </body>
 </html>
