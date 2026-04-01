@@ -1,9 +1,6 @@
 package main
 
 import (
-	"net/http"
-	"net/http/httptest"
-	"strings"
 	"testing"
 
 	"github.com/mbow/go-xsearch/bloom"
@@ -233,48 +230,4 @@ func BenchmarkEngineSearch_PrefixBoost(b *testing.B) {
 	}
 }
 
-// --- HTTP handler benchmarks (full round-trip minus network) ---
-
-func BenchmarkHTTPSearch_ColdCache(b *testing.B) {
-	e := benchEngine(b)
-	app := &App{engine: e, cache: newFragmentCache(1024)}
-	app.loadTemplates()
-	b.ResetTimer()
-	for b.Loop() {
-		app.cache.invalidate()
-		req := httptest.NewRequest("GET", "/search?q=bud", nil)
-		w := httptest.NewRecorder()
-		app.handleSearch(w, req)
-	}
-}
-
-func BenchmarkHTTPSearch_WarmCache(b *testing.B) {
-	e := benchEngine(b)
-	app := &App{engine: e, cache: newFragmentCache(1024)}
-	app.loadTemplates()
-	req := httptest.NewRequest("GET", "/search?q=bud", nil)
-	w := httptest.NewRecorder()
-	app.handleSearch(w, req)
-	b.ResetTimer()
-	for b.Loop() {
-		req := httptest.NewRequest("GET", "/search?q=bud", nil)
-		w := httptest.NewRecorder()
-		app.handleSearch(w, req)
-	}
-}
-
-func BenchmarkHTTPSelect(b *testing.B) {
-	e := benchEngine(b)
-	app := &App{engine: e, cache: newFragmentCache(1024)}
-	b.ResetTimer()
-	for b.Loop() {
-		body := strings.NewReader(`{"id": "0"}`)
-		req := httptest.NewRequest("POST", "/select", body)
-		req.Header.Set("Content-Type", "application/json")
-		w := httptest.NewRecorder()
-		app.handleSelect(w, req)
-		if w.Code != http.StatusOK {
-			b.Fatalf("expected 200, got %d", w.Code)
-		}
-	}
-}
+// HTTP handler benchmarks are in internal/server/server_test.go
