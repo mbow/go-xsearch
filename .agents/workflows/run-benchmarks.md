@@ -13,19 +13,24 @@ Ensure the benchmarking tool `benchstat` is installed on the machine:
 
 2. **Establish the Comparison State**
 Evaluate the user's intent:
-- **Scenario A:** If the user is currently looking at the `main` branch or a clean state and wants to save *this* as the baseline to compare *later*, you must record the baseline and save it:
+- **Scenario A:** If the user is currently looking at the `main` branch or a clean state and wants to save *this* as the local baseline to compare *later*, you must record the baseline and save it:
   ```bash
   make bench-record
   make bench-save
   ```
-- **Scenario B:** (Most Common) If the user has *already* made code changes and wants to see how they affect performance against the saved baseline (`bench-prev.txt`), you just need to run the new benchmarks:
+- **Scenario B:** (Most Common) If the user has *already* made code changes and wants to see how they affect performance against the saved local baseline (`docs/benchmarks/bench-prev.txt`), you just need to run the new benchmarks:
 // turbo
 `make bench-record`
+- **Scenario C:** If the user wants to compare strictly against the original pristine project baseline, run the benchmarks and then compare against `baseline.txt`:
+```bash
+make bench-record
+make bench-compare-baseline
+```
 
 3. **Compare and Output the Differences**
 Run the comparison between the saved baseline and the latest run:
 // turbo
-`make bench-compare`
+`make bench-compare` (or `make bench-compare-baseline` if Scenario C)
 
 4. **Summarize for the User**
 Read the system output from the `make bench-compare` execution and present a clean, organized summary to the user. Describe all results clearly:

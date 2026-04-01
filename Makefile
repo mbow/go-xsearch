@@ -7,23 +7,30 @@ bench:
 	go test -bench . -benchmem ./benchmarks/...
 
 bench-record:
-	@echo "Running benchmarks and saving to bench-latest.txt..."
-	go test -bench . -benchmem -count=5 ./benchmarks/... > bench-latest.txt
-	@echo "Saved to bench-latest.txt"
+	@echo "Running benchmarks and saving to docs/benchmarks/bench-latest.txt..."
+	go test -bench . -benchmem -count=5 ./benchmarks/... > docs/benchmarks/bench-latest.txt
+	@echo "Saved to docs/benchmarks/bench-latest.txt"
 
 bench-save:
-	@if [ -f bench-latest.txt ]; then \
-		cp bench-latest.txt bench-prev.txt; \
-		echo "Backed up bench-latest.txt to bench-prev.txt"; \
+	@if [ -f docs/benchmarks/bench-latest.txt ]; then \
+		cp docs/benchmarks/bench-latest.txt docs/benchmarks/bench-prev.txt; \
+		echo "Backed up docs/benchmarks/bench-latest.txt to docs/benchmarks/bench-prev.txt"; \
 	else \
-		echo "No bench-latest.txt found. Run 'make bench-record' first."; \
+		echo "No docs/benchmarks/bench-latest.txt found. Run 'make bench-record' first."; \
 	fi
 
 bench-compare:
-	@if [ ! -f bench-prev.txt ]; then \
-		echo "No bench-prev.txt found. Run 'make bench-save' then 'make bench-record' to create comparison points."; \
+	@if [ ! -f docs/benchmarks/bench-prev.txt ]; then \
+		echo "No docs/benchmarks/bench-prev.txt found. Run 'make bench-save' then 'make bench-record' to create comparison points."; \
 	else \
-		benchstat bench-prev.txt bench-latest.txt; \
+		benchstat docs/benchmarks/bench-prev.txt docs/benchmarks/bench-latest.txt; \
+	fi
+
+bench-compare-baseline:
+	@if [ ! -f docs/benchmarks/bench-latest.txt ]; then \
+		echo "No docs/benchmarks/bench-latest.txt found. Run 'make bench-record' first."; \
+	else \
+		benchstat docs/benchmarks/baseline.txt docs/benchmarks/bench-latest.txt; \
 	fi
 
 test:
