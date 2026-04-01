@@ -7,7 +7,6 @@
 package bm25
 
 import (
-	"container/heap"
 	"fmt"
 	"math"
 	"slices"
@@ -32,23 +31,30 @@ type SearchResult struct {
 
 const maxSearchResults = 10
 
-type resultHeap []SearchResult
-
-func (h resultHeap) Len() int            { return len(h) }
-func (h resultHeap) Less(i, j int) bool {
-	if h[i].Score != h[j].Score {
-		return h[i].Score < h[j].Score
+// lessResult returns true if a has lower priority (smaller score, or same score with higher ID).
+func lessResult(a, b SearchResult) bool {
+	if a.Score != b.Score {
+		return a.Score < b.Score
 	}
-	return h[i].ProductID > h[j].ProductID // higher ID = lower priority (evicted first)
+	return a.ProductID > b.ProductID
 }
-func (h resultHeap) Swap(i, j int)       { h[i], h[j] = h[j], h[i] }
-func (h *resultHeap) Push(x any)         { *h = append(*h, x.(SearchResult)) }
-func (h *resultHeap) Pop() any {
-	old := *h
-	n := len(old)
-	x := old[n-1]
-	*h = old[:n-1]
-	return x
+
+// siftDown restores the min-heap property starting at root.
+func siftDown(h []SearchResult, root, n int) {
+	for {
+		child := 2*root + 1
+		if child >= n {
+			break
+		}
+		if child+1 < n && lessResult(h[child+1], h[child]) {
+			child++
+		}
+		if !lessResult(h[child], h[root]) {
+			break
+		}
+		h[root], h[child] = h[child], h[root]
+		root = child
+	}
 }
 
 // Index holds the precomputed BM25 data structures for a product catalog.
@@ -254,8 +260,8 @@ func (idx *Index) Search(query string) []SearchResult {
 	}
 	prefixBonus := 0.5 * maxIDF
 
-	// Score each candidate using a min-heap of size maxSearchResults.
-	h := make(resultHeap, 0, maxSearchResults+1)
+	h := make([]SearchResult, 0, maxSearchResults)
+	hLen := 0
 
 	for _, id := range candidates {
 		score := idx.Score(id, queryTerms)
@@ -267,11 +273,22 @@ func (idx *Index) Search(query string) []SearchResult {
 			continue
 		}
 
-		if h.Len() < maxSearchResults {
-			heap.Push(&h, SearchResult{ProductID: id, Score: score, PrefixMatch: pm})
+		r := SearchResult{ProductID: id, Score: score, PrefixMatch: pm}
+		if hLen < maxSearchResults {
+			h = append(h, r)
+			hLen++
+			// Sift up.
+			for i := hLen - 1; i > 0; {
+				parent := (i - 1) / 2
+				if !lessResult(h[i], h[parent]) {
+					break
+				}
+				h[i], h[parent] = h[parent], h[i]
+				i = parent
+			}
 		} else if score > h[0].Score {
-			h[0] = SearchResult{ProductID: id, Score: score, PrefixMatch: pm}
-			heap.Fix(&h, 0)
+			h[0] = r
+			siftDown(h, 0, hLen)
 		}
 	}
 
@@ -282,9 +299,14 @@ func (idx *Index) Search(query string) []SearchResult {
 	idx.seenPool.Put(seenPtr)
 
 	// Drain heap in descending score order.
-	results := make([]SearchResult, h.Len())
-	for i := len(results) - 1; i >= 0; i-- {
-		results[i] = heap.Pop(&h).(SearchResult)
+	results := make([]SearchResult, hLen)
+	for i := hLen - 1; i >= 0; i-- {
+		results[i] = h[0]
+		h[0] = h[hLen-1]
+		hLen--
+		if hLen > 0 {
+			siftDown(h, 0, hLen)
+		}
 	}
 
 	return results
