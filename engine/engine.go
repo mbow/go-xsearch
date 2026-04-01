@@ -233,18 +233,27 @@ func (e *Engine) Search(query string) []Result {
 
 // searchInternal performs the full search pipeline.
 func (e *Engine) searchInternal(query string) []Result {
-	score := e.ranker.Scorer()
+	// Defer Scorer() allocation until we know we have results to score.
+	var score scorerFunc
+	getScorer := func() scorerFunc {
+		if score == nil {
+			score = e.ranker.Scorer()
+		}
+		return score
+	}
 
 	// Try BM25 path first (word-level matching)
 	bm25Results := e.bm25idx.Search(query)
 	if len(bm25Results) > 0 {
-		return e.buildBM25Results(bm25Results, score, query)
+		return e.buildBM25Results(bm25Results, getScorer(), query)
 	}
 
 	// Fallback to Jaccard trigram path (handles typos/fuzzy)
 	trigrams := index.ExtractTrigrams(query)
 	if len(trigrams) == 0 {
-		return e.buildResults(e.index.Search(query), MatchDirect, score, query)
+		results := e.buildResults(e.index.Search(query), MatchDirect, getScorer())
+		addHighlights(results, query)
+		return results
 	}
 
 	anyPass := false
@@ -265,13 +274,16 @@ func (e *Engine) searchInternal(query string) []Result {
 				goodResults++
 			}
 		}
-		results = append(results, e.buildResults(searchResults, MatchDirect, score, query)...)
+		results = append(results, e.buildResults(searchResults, MatchDirect, getScorer())...)
 		if goodResults < minDirectResults {
-			fallbackResults := e.categoryFallback(query, searchResults, score)
+			fallbackResults := e.categoryFallback(query, searchResults, getScorer())
 			results = append(results, fallbackResults...)
 		}
 	} else {
-		results = append(results, e.categoryFallback(query, nil, score)...)
+		// Check if any categories match before creating the Scorer.
+		if cats := e.index.SearchCategories(query); len(cats) > 0 {
+			results = append(results, e.categoryFallback(query, nil, getScorer())...)
+		}
 	}
 
 	slices.SortFunc(results, func(a, b Result) int {
@@ -281,6 +293,9 @@ func (e *Engine) searchInternal(query string) []Result {
 	if len(results) > maxResults {
 		results = results[:maxResults]
 	}
+
+	// Compute highlights only for final top-K results.
+	addHighlights(results, query)
 
 	return results
 }
@@ -385,9 +400,7 @@ func (e *Engine) buildBM25Results(bm25Results []bm25.SearchResult, score scorerF
 		maxBM25 = 1.0
 	}
 
-	// Pre-split query words once to avoid per-result strings.Fields allocation.
-	queryWords := strings.Fields(query)
-
+	// Score all candidates without computing highlights (avoids per-result allocations).
 	results := make([]Result, 0, min(len(bm25Results), maxResults))
 	for _, r := range bm25Results {
 		if r.ProductID < 0 || r.ProductID >= len(e.products) {
@@ -398,14 +411,11 @@ func (e *Engine) buildBM25Results(bm25Results []bm25.SearchResult, score scorerF
 		popScore := score(r.ProductID, 0)
 		combined := bm25Alpha*normalizedBM25 + bm25PopAlpha*popScore
 
-		hl := computeHighlights(e.products[r.ProductID].Name, queryWords, query)
 		results = append(results, Result{
-			Product:         e.products[r.ProductID],
-			ProductID:       r.ProductID,
-			Score:           combined,
-			MatchType:       MatchDirect,
-			Highlights:      hl,
-			HighlightedName: buildHighlightedName(e.products[r.ProductID].Name, hl),
+			Product:   e.products[r.ProductID],
+			ProductID: r.ProductID,
+			Score:     combined,
+			MatchType: MatchDirect,
 		})
 	}
 
@@ -418,31 +428,48 @@ func (e *Engine) buildBM25Results(bm25Results []bm25.SearchResult, score scorerF
 		results = results[:maxResults]
 	}
 
+	// Compute highlights only for the final top-K results to minimize allocations.
+	queryWords := strings.Fields(query)
+	for i := range results {
+		hl := computeHighlights(results[i].Product.Name, queryWords, query)
+		results[i].Highlights = hl
+		results[i].HighlightedName = buildHighlightedName(results[i].Product.Name, hl)
+	}
+
 	return results
 }
 
 // buildResults converts index search results to engine results with combined scores.
-func (e *Engine) buildResults(searchResults []index.SearchResult, matchType MatchType, score scorerFunc, query string) []Result {
-	// Pre-split query words once to avoid per-result strings.Fields allocation.
-	queryWords := strings.Fields(query)
-
+// Highlights are deferred — call addHighlights on the final results after truncation.
+func (e *Engine) buildResults(searchResults []index.SearchResult, matchType MatchType, score scorerFunc) []Result {
 	results := make([]Result, 0, len(searchResults))
 	for _, sr := range searchResults {
 		if sr.ProductID < 0 || sr.ProductID >= len(e.products) {
 			continue
 		}
 		s := score(sr.ProductID, sr.Score)
-		hl := computeHighlights(e.products[sr.ProductID].Name, queryWords, query)
 		results = append(results, Result{
-			Product:         e.products[sr.ProductID],
-			ProductID:       sr.ProductID,
-			Score:           s,
-			MatchType:       matchType,
-			Highlights:      hl,
-			HighlightedName: buildHighlightedName(e.products[sr.ProductID].Name, hl),
+			Product:   e.products[sr.ProductID],
+			ProductID: sr.ProductID,
+			Score:     s,
+			MatchType: matchType,
 		})
 	}
 	return results
+}
+
+// addHighlights computes match highlighting for a slice of results.
+// Call this only on the final top-K results to minimize allocations.
+func addHighlights(results []Result, query string) {
+	if len(results) == 0 {
+		return
+	}
+	queryWords := strings.Fields(query)
+	for i := range results {
+		hl := computeHighlights(results[i].Product.Name, queryWords, query)
+		results[i].Highlights = hl
+		results[i].HighlightedName = buildHighlightedName(results[i].Product.Name, hl)
+	}
 }
 
 // categoryFallback finds the best matching category and returns its top products.
