@@ -235,7 +235,8 @@ func (idx *Index) Search(query string) []SearchResult {
 	}
 
 	// Minimum hit threshold: require ≥ 1/3 of query trigrams to match.
-	minHits := uint8(max(1, numQueryGrams/3))
+	// Cap at 255 to prevent uint8 overflow for extremely long queries.
+	minHits := uint8(min(255, max(1, numQueryGrams/3)))
 
 	// Score candidates that pass the threshold.
 	var results []SearchResult

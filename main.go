@@ -122,12 +122,14 @@ func (app *App) handleSearch(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Ghost text: completion suffix from the top result.
+	// Uses len(query) to index into name — safe because query is already
+	// lowercased (line 100) and ASCII lowering preserves byte length.
 	if len(results) > 0 {
 		name := results[0].Product.Name
 		lowerName := strings.ToLower(name)
-		lowerQuery := strings.ToLower(query)
-		if strings.HasPrefix(lowerName, lowerQuery) {
-			data.Ghost = name[len(lowerQuery):]
+		if strings.HasPrefix(lowerName, query) && len(query) <= len(name) {
+			data.Ghost = name[len(query):]
 		}
 	}
 
