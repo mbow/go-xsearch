@@ -44,7 +44,7 @@ type Index struct {
 	trigrams    map[int]map[string]struct{}   // product ID → its trigram set
 	catTrigrams map[string]map[string]struct{} // category → its trigram set
 	catProducts map[string][]int              // category → product IDs
-	hitsPool    sync.Pool                     // reusable []int16 hit counters
+	hitsPool    sync.Pool                     // reusable []uint8 hit counters
 }
 
 // Snapshot holds the serializable state of an [Index].
@@ -102,7 +102,7 @@ func FromSnapshot(s Snapshot, products []catalog.Product) *Index {
 		trigrams:    trigrams,
 		catTrigrams: catTrigrams,
 		catProducts: s.CatProducts,
-		hitsPool:    sync.Pool{New: func() any { s := make([]int16, n); return &s }},
+		hitsPool:    sync.Pool{New: func() any { s := make([]uint8, n); return &s }},
 	}
 }
 
@@ -117,7 +117,7 @@ func NewIndex(products []catalog.Product) *Index {
 		trigrams:    make(map[int]map[string]struct{}),
 		catTrigrams: make(map[string]map[string]struct{}),
 		catProducts: make(map[string][]int),
-		hitsPool:    sync.Pool{New: func() any { s := make([]int16, n); return &s }},
+		hitsPool:    sync.Pool{New: func() any { s := make([]uint8, n); return &s }},
 	}
 
 	for id, p := range products {
@@ -186,7 +186,7 @@ func (idx *Index) Search(query string) []SearchResult {
 	})
 
 	// Count trigram hits per candidate using a pooled array.
-	hitsPtr := idx.hitsPool.Get().(*[]int16)
+	hitsPtr := idx.hitsPool.Get().(*[]uint8)
 	hits := *hitsPtr
 
 	const (
@@ -196,7 +196,9 @@ func (idx *Index) Search(query string) []SearchResult {
 
 	var touched []int
 	for _, id := range idx.posting[sorted[0].gram] {
-		hits[id]++
+		if hits[id] < 255 {
+			hits[id]++
+		}
 		touched = append(touched, id)
 	}
 	for _, entry := range sorted[1:] {
@@ -204,7 +206,9 @@ func (idx *Index) Search(query string) []SearchResult {
 		expand := len(posting) <= maxPostingExpand && len(touched) < maxCandidates
 		for _, id := range posting {
 			if hits[id] > 0 {
-				hits[id]++
+				if hits[id] < 255 {
+					hits[id]++
+				}
 			} else if expand {
 				hits[id]++
 				touched = append(touched, id)
@@ -213,7 +217,7 @@ func (idx *Index) Search(query string) []SearchResult {
 	}
 
 	// Minimum hit threshold: require ≥ 1/3 of query trigrams to match.
-	minHits := int16(max(1, numQueryGrams/3))
+	minHits := uint8(max(1, numQueryGrams/3))
 
 	// Score candidates that pass the threshold.
 	var results []SearchResult

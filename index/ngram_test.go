@@ -163,3 +163,15 @@ func TestProductsByCategory(t *testing.T) {
 		t.Errorf("expected 2 beer products, got %d", len(ids))
 	}
 }
+
+func TestSearchSaturationSafety(t *testing.T) {
+	longName := "abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz"
+	products := []catalog.Product{
+		{Name: longName, Category: "test"},
+	}
+	idx := NewIndex(products)
+	results := idx.Search(longName[:30])
+	if len(results) == 0 {
+		t.Fatal("expected results for long query substring")
+	}
+}
