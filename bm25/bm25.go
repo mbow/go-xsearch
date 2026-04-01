@@ -12,6 +12,7 @@ import (
 	"math"
 	"slices"
 	"strings"
+	"sync"
 	"unicode"
 
 	"github.com/mbow/go-xsearch/catalog"
@@ -38,6 +39,7 @@ type Index struct {
 	wordPrefixes   []map[string]struct{}   // product ID → set of word prefixes
 	prefixPosting  map[string][]int        // prefix → product IDs (inverted index for fast prefix lookup)
 	posting        map[string][]int
+	seenPool       sync.Pool
 	k1             float64
 	b              float64
 }
@@ -145,6 +147,8 @@ func NewIndex(products []catalog.Product) *Index {
 		idx.idf[term] = math.Log((float64(n)-float64(d)+0.5)/(float64(d)+0.5) + 1)
 	}
 
+	idx.seenPool = sync.Pool{New: func() any { s := make([]bool, n); return &s }}
+
 	return idx
 }
 
@@ -196,17 +200,27 @@ func (idx *Index) Search(query string) []SearchResult {
 	}
 
 	// Collect candidates from term posting lists and prefix posting lists.
-	seen := make(map[int]struct{})
+	seenPtr := idx.seenPool.Get().(*[]bool)
+	seen := *seenPtr
+	var candidates []int
+
 	for _, term := range queryTerms {
 		for _, id := range idx.posting[term] {
-			seen[id] = struct{}{}
+			if !seen[id] {
+				seen[id] = true
+				candidates = append(candidates, id)
+			}
 		}
 		for _, id := range idx.prefixPosting[term] {
-			seen[id] = struct{}{}
+			if !seen[id] {
+				seen[id] = true
+				candidates = append(candidates, id)
+			}
 		}
 	}
 
-	if len(seen) == 0 {
+	if len(candidates) == 0 {
+		idx.seenPool.Put(seenPtr)
 		return nil
 	}
 
@@ -220,8 +234,8 @@ func (idx *Index) Search(query string) []SearchResult {
 	prefixBonus := 0.5 * maxIDF
 
 	// Score each candidate.
-	results := make([]SearchResult, 0, len(seen))
-	for id := range seen {
+	results := make([]SearchResult, 0, min(len(candidates), 64))
+	for _, id := range candidates {
 		score := idx.Score(id, queryTerms)
 		pm := idx.HasPrefixMatch(id, queryTerms)
 		if pm {
@@ -235,6 +249,12 @@ func (idx *Index) Search(query string) []SearchResult {
 			})
 		}
 	}
+
+	// Clear seen entries and return to pool.
+	for _, id := range candidates {
+		seen[id] = false
+	}
+	idx.seenPool.Put(seenPtr)
 
 	// Sort by score descending, then by ProductID ascending as tiebreaker.
 	slices.SortFunc(results, func(a, b SearchResult) int {
@@ -303,7 +323,7 @@ func FromSnapshot(s Snapshot) (*Index, error) {
 		}
 		wp[i] = m
 	}
-	return &Index{
+	idx := &Index{
 		idf:           s.IDF,
 		termFreqs:     s.TermFreqs,
 		docLens:       s.DocLens,
@@ -313,5 +333,7 @@ func FromSnapshot(s Snapshot) (*Index, error) {
 		posting:       s.Posting,
 		k1:            s.K1,
 		b:             s.B,
-	}, nil
+	}
+	idx.seenPool = sync.Pool{New: func() any { s := make([]bool, n); return &s }}
+	return idx, nil
 }

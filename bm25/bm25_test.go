@@ -223,6 +223,18 @@ func BenchmarkBM25FromSnapshot(b *testing.B) {
 	}
 }
 
+func BenchmarkBM25Search_CommonPrefix(b *testing.B) {
+	products, err := catalog.EmbeddedProducts()
+	if err != nil {
+		b.Skip("embedded products not available")
+	}
+	idx := NewIndex(products)
+	b.ResetTimer()
+	for b.Loop() {
+		idx.Search("b")
+	}
+}
+
 func TestNewIndex_PrefixCap(t *testing.T) {
 	products := []catalog.Product{
 		{Name: "Weihenstephaner Hefeweissbier", Category: "beer"},
