@@ -77,14 +77,15 @@ spirits, shoes, phones, headphones, sodas):
 
 | Query Type                    | Example             |       Time | Allocations |
 | ----------------------------- | ------------------- | ---------: | ----------: |
-| Cached prefix (1-2 chars)     | `"b"`               |  **13 ns** |           0 |
-| Category match                | `"beer"`            |  **16 ns** |           0 |
-| Prefix (3+ chars)             | `"nik"`             | **1.1 us** |           8 |
-| Bloom rejection (gibberish)   | `"xzqwvp"`          | **1.4 us** |           4 |
-| Fuzzy / typo                  | `"budwiser"`        | **2.8 us** |          13 |
-| Full pipeline with popularity | `"budweiser"`       | **5.7 us** |          18 |
-| HTTP response (warm cache)    | `GET /search?q=bud` | **2.4 us** |          24 |
-| HTTP response (cold cache)    | `GET /search?q=bud` |  **45 us** |         257 |
+| Cached prefix (1-2 chars)     | `"b"`               |  **12 ns** |           0 |
+| Category match                | `"beer"`            |  **15 ns** |           0 |
+| Short query fix               | `"bud"`             | **9.4 us** |          10 |
+| Prefix (3+ chars)             | `"nik"`             | **0.8 us** |           5 |
+| Bloom rejection (gibberish)   | `"xzqwvp"`          | **1.3 us** |           5 |
+| Fuzzy / typo                  | `"budwiser"`        | **2.9 us** |          19 |
+| Full pipeline with popularity | `"budweiser"`       | **5.2 us** |          21 |
+| HTTP response (warm cache)    | `GET /search?q=bud` | **2.3 us** |          24 |
+| HTTP response (cold cache)    | `GET /search?q=bud` |  **46 us** |         312 |
 
 > 1 us (microsecond) = 0.001 milliseconds. Most queries complete in **under 6
 > microseconds**.
