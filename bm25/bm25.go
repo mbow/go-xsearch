@@ -7,7 +7,7 @@
 package bm25
 
 import (
-	"cmp"
+	"container/heap"
 	"fmt"
 	"math"
 	"slices"
@@ -28,6 +28,27 @@ type SearchResult struct {
 	ProductID   int
 	Score       float64
 	PrefixMatch bool
+}
+
+const maxSearchResults = 10
+
+type resultHeap []SearchResult
+
+func (h resultHeap) Len() int            { return len(h) }
+func (h resultHeap) Less(i, j int) bool {
+	if h[i].Score != h[j].Score {
+		return h[i].Score < h[j].Score
+	}
+	return h[i].ProductID > h[j].ProductID // higher ID = lower priority (evicted first)
+}
+func (h resultHeap) Swap(i, j int)       { h[i], h[j] = h[j], h[i] }
+func (h *resultHeap) Push(x any)         { *h = append(*h, x.(SearchResult)) }
+func (h *resultHeap) Pop() any {
+	old := *h
+	n := len(old)
+	x := old[n-1]
+	*h = old[:n-1]
+	return x
 }
 
 // Index holds the precomputed BM25 data structures for a product catalog.
@@ -233,20 +254,24 @@ func (idx *Index) Search(query string) []SearchResult {
 	}
 	prefixBonus := 0.5 * maxIDF
 
-	// Score each candidate.
-	results := make([]SearchResult, 0, min(len(candidates), 64))
+	// Score each candidate using a min-heap of size maxSearchResults.
+	h := make(resultHeap, 0, maxSearchResults+1)
+
 	for _, id := range candidates {
 		score := idx.Score(id, queryTerms)
 		pm := idx.HasPrefixMatch(id, queryTerms)
 		if pm {
 			score += prefixBonus
 		}
-		if score > 0 {
-			results = append(results, SearchResult{
-				ProductID:   id,
-				Score:       score,
-				PrefixMatch: pm,
-			})
+		if score <= 0 {
+			continue
+		}
+
+		if h.Len() < maxSearchResults {
+			heap.Push(&h, SearchResult{ProductID: id, Score: score, PrefixMatch: pm})
+		} else if score > h[0].Score {
+			h[0] = SearchResult{ProductID: id, Score: score, PrefixMatch: pm}
+			heap.Fix(&h, 0)
 		}
 	}
 
@@ -256,13 +281,11 @@ func (idx *Index) Search(query string) []SearchResult {
 	}
 	idx.seenPool.Put(seenPtr)
 
-	// Sort by score descending, then by ProductID ascending as tiebreaker.
-	slices.SortFunc(results, func(a, b SearchResult) int {
-		if c := cmp.Compare(b.Score, a.Score); c != 0 {
-			return c
-		}
-		return cmp.Compare(a.ProductID, b.ProductID)
-	})
+	// Drain heap in descending score order.
+	results := make([]SearchResult, h.Len())
+	for i := len(results) - 1; i >= 0; i-- {
+		results[i] = heap.Pop(&h).(SearchResult)
+	}
 
 	return results
 }
