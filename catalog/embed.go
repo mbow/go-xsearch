@@ -7,7 +7,6 @@ import (
 	"compress/gzip"
 	_ "embed"
 	"fmt"
-	"io"
 	"sync"
 
 	"github.com/fxamacker/cbor/v2"
@@ -29,41 +28,50 @@ type payload struct {
 var (
 	decoded        payload
 	productsByName map[string]*Product
-	productsByID   map[int]*Product
 	initOnce       sync.Once
+	nameIndexOnce  sync.Once
 	initErr        error
 )
 
+func decodePayload(data []byte) (payload, error) {
+	var decoded payload
+
+	if len(data) == 0 {
+		return decoded, fmt.Errorf("catalog: embedded CBOR data is empty (run go generate ./catalog/)")
+	}
+
+	gzReader, err := gzip.NewReader(bytes.NewReader(data))
+	if err != nil {
+		return decoded, fmt.Errorf("catalog: decompressing gzip: %w", err)
+	}
+	defer gzReader.Close()
+
+	if err := cbor.NewDecoder(gzReader).Decode(&decoded); err != nil {
+		return decoded, fmt.Errorf("catalog: unmarshaling CBOR: %w", err)
+	}
+
+	return decoded, nil
+}
+
 func initEmbedded() {
 	initOnce.Do(func() {
-		if len(rawCBOR) == 0 {
-			initErr = fmt.Errorf("catalog: embedded CBOR data is empty (run go generate ./catalog/)")
-			return
-		}
-
-		gzReader, err := gzip.NewReader(bytes.NewReader(rawCBOR))
+		payload, err := decodePayload(rawCBOR)
 		if err != nil {
-			initErr = fmt.Errorf("catalog: decompressing gzip: %w", err)
+			initErr = err
 			return
 		}
-		defer gzReader.Close()
+		decoded = payload
+	})
+}
 
-		cborData, err := io.ReadAll(gzReader)
-		if err != nil {
-			initErr = fmt.Errorf("catalog: reading gzip: %w", err)
+func initProductsByName() {
+	nameIndexOnce.Do(func() {
+		if initErr != nil {
 			return
 		}
-
-		if err := cbor.Unmarshal(cborData, &decoded); err != nil {
-			initErr = fmt.Errorf("catalog: unmarshaling CBOR: %w", err)
-			return
-		}
-
 		productsByName = make(map[string]*Product, len(decoded.Products))
-		productsByID = make(map[int]*Product, len(decoded.Products))
 		for i := range decoded.Products {
 			productsByName[decoded.Products[i].Name] = &decoded.Products[i]
-			productsByID[i] = &decoded.Products[i]
 		}
 	})
 }
@@ -102,6 +110,7 @@ func GetByName(name string) (*Product, error) {
 	if initErr != nil {
 		return nil, initErr
 	}
+	initProductsByName()
 	return productsByName[name], nil
 }
 
@@ -111,7 +120,10 @@ func GetByID(id int) (*Product, error) {
 	if initErr != nil {
 		return nil, initErr
 	}
-	return productsByID[id], nil
+	if id < 0 || id >= len(decoded.Products) {
+		return nil, nil
+	}
+	return &decoded.Products[id], nil
 }
 
 // EmbeddedCount returns the number of embedded products.

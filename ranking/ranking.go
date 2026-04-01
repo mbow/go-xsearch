@@ -22,21 +22,25 @@ import (
 
 // Ranker tracks product selection popularity with exponential time decay.
 type Ranker struct {
-	mu         sync.RWMutex
-	lambda     float64
-	alpha      float64
-	selections map[int][]time.Time
-	maxDirty   bool    // true when maxCached needs recalculation
-	maxCached  float64 // cached max popularity score
+	mu            sync.RWMutex
+	lambda        float64
+	alpha         float64
+	selections    map[int][]time.Time
+	snapshotDirty bool
+	snapshot      popularitySnapshot
+}
+
+type popularitySnapshot struct {
+	normalized map[int]float64
 }
 
 // New creates a Ranker with the given decay rate and alpha.
 func New(lambda, alpha float64) *Ranker {
 	return &Ranker{
-		lambda:     lambda,
-		alpha:      alpha,
-		selections: make(map[int][]time.Time),
-		maxDirty:   true,
+		lambda:        lambda,
+		alpha:         alpha,
+		selections:    make(map[int][]time.Time),
+		snapshotDirty: true,
 	}
 }
 
@@ -45,7 +49,7 @@ func (r *Ranker) RecordSelection(productID int) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.selections[productID] = append(r.selections[productID], time.Now())
-	r.maxDirty = true
+	r.snapshotDirty = true
 }
 
 // SetSelections sets the selection timestamps for a product directly (used for testing and loading from disk).
@@ -53,7 +57,7 @@ func (r *Ranker) SetSelections(productID int, timestamps []time.Time) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.selections[productID] = timestamps
-	r.maxDirty = true
+	r.snapshotDirty = true
 }
 
 // rawScore computes the exponential decay score for a product. Caller must hold at least RLock.
@@ -70,24 +74,71 @@ func (r *Ranker) rawScore(productID int, now time.Time) float64 {
 	return score
 }
 
-// recomputeMax recalculates the max popularity score. Caller must hold lock.
-func (r *Ranker) recomputeMax(now time.Time) {
-	if !r.maxDirty {
+// rebuildSnapshotLocked recalculates normalized popularity scores. Caller must hold lock.
+func (r *Ranker) rebuildSnapshotLocked() {
+	if !r.snapshotDirty {
 		return
 	}
+
+	if len(r.selections) == 0 {
+		r.snapshot = popularitySnapshot{}
+		r.snapshotDirty = false
+		return
+	}
+
+	now := time.Now()
+	normalized := make(map[int]float64, len(r.selections))
 	maxScore := 0.0
-	for _, timestamps := range r.selections {
+	for id, timestamps := range r.selections {
 		var s float64
 		for _, ts := range timestamps {
 			ageDays := now.Sub(ts).Hours() / 24
 			s += math.Exp(-r.lambda * ageDays)
 		}
+		if s == 0 {
+			continue
+		}
+		normalized[id] = s
 		if s > maxScore {
 			maxScore = s
 		}
 	}
-	r.maxCached = maxScore
-	r.maxDirty = false
+
+	if maxScore > 0 {
+		for id, s := range normalized {
+			normalized[id] = s / maxScore
+		}
+	} else {
+		normalized = nil
+	}
+
+	r.snapshot = popularitySnapshot{normalized: normalized}
+	r.snapshotDirty = false
+}
+
+func (r *Ranker) snapshotView() (popularitySnapshot, float64) {
+	r.mu.RLock()
+	if !r.snapshotDirty {
+		snapshot := r.snapshot
+		alpha := r.alpha
+		r.mu.RUnlock()
+		return snapshot, alpha
+	}
+	r.mu.RUnlock()
+
+	r.mu.Lock()
+	r.rebuildSnapshotLocked()
+	snapshot := r.snapshot
+	alpha := r.alpha
+	r.mu.Unlock()
+	return snapshot, alpha
+}
+
+func (s popularitySnapshot) score(productID int) float64 {
+	if s.normalized == nil {
+		return 0
+	}
+	return s.normalized[productID]
 }
 
 // PopularityScore computes the raw exponential decay score for a product.
@@ -101,17 +152,8 @@ func (r *Ranker) PopularityScore(productID int) float64 {
 // by dividing by the maximum popularity score across all products.
 // The max is cached and only recomputed when selections change.
 func (r *Ranker) NormalizedPopularity(productID int) float64 {
-	r.mu.Lock()
-	now := time.Now()
-	r.recomputeMax(now)
-	maxScore := r.maxCached
-	score := r.rawScore(productID, now)
-	r.mu.Unlock()
-
-	if maxScore == 0 {
-		return 0
-	}
-	return score / maxScore
+	snapshot, _ := r.snapshotView()
+	return snapshot.score(productID)
 }
 
 // CombinedScore computes the final ranking score by fusing relevance and popularity.
@@ -129,31 +171,10 @@ func (r *Ranker) CombinedScore(productID int, relevance float64) float64 {
 // The snapshot is a pre-computed map of product ID to raw decay score, taken
 // under the lock, so the returned closure is safe for concurrent use.
 func (r *Ranker) Scorer() func(productID int, relevance float64) float64 {
-	r.mu.Lock()
-	now := time.Now()
-	r.recomputeMax(now)
-	maxScore := r.maxCached
-	alpha := r.alpha
-	lambda := r.lambda
-
-	// Pre-compute decay scores under the lock to avoid a data race.
-	// The closure only reads this local map — no shared state.
-	scores := make(map[int]float64, len(r.selections))
-	for id, timestamps := range r.selections {
-		var s float64
-		for _, ts := range timestamps {
-			ageDays := now.Sub(ts).Hours() / 24
-			s += math.Exp(-lambda * ageDays)
-		}
-		scores[id] = s
-	}
-	r.mu.Unlock()
+	snapshot, alpha := r.snapshotView()
 
 	return func(productID int, relevance float64) float64 {
-		var pop float64
-		if maxScore > 0 {
-			pop = scores[productID] / maxScore
-		}
+		pop := snapshot.score(productID)
 		return alpha*relevance + (1-alpha)*pop
 	}
 }
@@ -194,7 +215,7 @@ func (r *Ranker) Load(path string) error {
 	if err := json.Unmarshal(data, &r.selections); err != nil {
 		return fmt.Errorf("ranking: unmarshaling selections: %w", err)
 	}
-	r.maxDirty = true
+	r.snapshotDirty = true
 	return nil
 }
 
@@ -217,5 +238,5 @@ func (r *Ranker) Prune(maxAgeDays int) {
 			r.selections[id] = kept
 		}
 	}
-	r.maxDirty = true
+	r.snapshotDirty = true
 }

@@ -207,3 +207,23 @@ func TestSearchSaturationSafety(t *testing.T) {
 		t.Fatal("expected results for long query substring")
 	}
 }
+
+func TestSearchDeduplicatesRepeatedTrigrams(t *testing.T) {
+	products := []catalog.Product{
+		{Name: "Banana", Category: "fruit"},
+	}
+	idx := NewIndex(products)
+
+	results := idx.Search("ana")
+	if len(results) != 1 {
+		t.Fatalf("expected exactly 1 result, got %d: %+v", len(results), results)
+	}
+	if results[0].ProductID != 0 {
+		t.Fatalf("expected Banana result, got product %d", results[0].ProductID)
+	}
+
+	const want = 1.0 / 3.0
+	if diff := results[0].Score - want; diff < -1e-9 || diff > 1e-9 {
+		t.Fatalf("expected score %.6f, got %.6f", want, results[0].Score)
+	}
+}

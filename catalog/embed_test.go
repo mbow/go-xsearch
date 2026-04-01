@@ -112,3 +112,15 @@ func TestEmbeddedMatchesJSON(t *testing.T) {
 		t.Errorf("total mismatches: %d", mismatches)
 	}
 }
+
+func BenchmarkDecodeEmbeddedPayload(b *testing.B) {
+	for b.Loop() {
+		decoded, err := decodePayload(rawCBOR)
+		if err != nil {
+			b.Fatal(err)
+		}
+		if len(decoded.Products) == 0 {
+			b.Fatal("expected decoded products")
+		}
+	}
+}

@@ -207,3 +207,42 @@ func TestSearchBudRanking(t *testing.T) {
 		}
 	}
 }
+
+func TestRecordSelectionMarksOnlySelectedCategoryDirty(t *testing.T) {
+	products := []catalog.Product{
+		{Name: "Budweiser", Category: "beer"},
+		{Name: "Miller Lite", Category: "beer"},
+		{Name: "Nike Air Max", Category: "shoes"},
+	}
+
+	e := New(products)
+	if len(e.dirtyCats) != 0 {
+		t.Fatalf("expected clean category cache after init, got %+v", e.dirtyCats)
+	}
+
+	e.RecordSelection(0)
+
+	if len(e.dirtyCats) != 1 {
+		t.Fatalf("expected exactly one dirty category, got %+v", e.dirtyCats)
+	}
+	if _, ok := e.dirtyCats["beer"]; !ok {
+		t.Fatalf("expected beer cache to be marked dirty, got %+v", e.dirtyCats)
+	}
+	if _, ok := e.dirtyCats["shoes"]; ok {
+		t.Fatalf("did not expect shoes cache to be dirty, got %+v", e.dirtyCats)
+	}
+
+	if results := e.Search("shoes"); len(results) == 0 {
+		t.Fatal("expected exact category results for shoes")
+	}
+	if _, ok := e.dirtyCats["beer"]; !ok {
+		t.Fatal("expected beer cache to remain dirty after searching shoes")
+	}
+
+	if results := e.Search("beer"); len(results) == 0 {
+		t.Fatal("expected exact category results for beer")
+	}
+	if _, ok := e.dirtyCats["beer"]; ok {
+		t.Fatalf("expected beer cache to be refreshed, got %+v", e.dirtyCats)
+	}
+}

@@ -6,13 +6,13 @@ package engine
 import (
 	"cmp"
 	"fmt"
-	"html"
-	"maps"
-	"github.com/mbow/go-xsearch/bm25"
 	"github.com/mbow/go-xsearch/bloom"
+	"github.com/mbow/go-xsearch/bm25"
 	"github.com/mbow/go-xsearch/catalog"
 	"github.com/mbow/go-xsearch/index"
 	"github.com/mbow/go-xsearch/ranking"
+	"html"
+	"maps"
 	"runtime"
 	"slices"
 	"strings"
@@ -54,8 +54,8 @@ type Engine struct {
 	bm25idx       *bm25.Index
 	prefixCache   map[string][]Result // precomputed results for 1-2 char prefixes
 	categoryCache map[string][]Result // precomputed top-N per category
-	catCacheDirty bool                // true when selections have changed
-	mu            sync.RWMutex        // protects categoryCache and catCacheDirty
+	dirtyCats     map[string]struct{} // categories requiring cache refresh
+	mu            sync.RWMutex        // protects categoryCache and dirtyCats
 }
 
 const (
@@ -211,22 +211,10 @@ func (e *Engine) Search(query string) []Result {
 		}
 	}
 
-	// Check if query exactly matches a category name — return precomputed top-N
-	e.mu.RLock()
-	if e.catCacheDirty {
-		e.mu.RUnlock()
-		e.mu.Lock()
-		if e.catCacheDirty {
-			e.rebuildCategoryCache()
-		}
-		e.mu.Unlock()
-		e.mu.RLock()
-	}
-	if cached, ok := e.categoryCache[query]; ok {
-		e.mu.RUnlock()
+	// Check if query exactly matches a category name — return precomputed top-N.
+	if cached, ok := e.ensureCategoryCached(query, nil); ok {
 		return cached
 	}
-	e.mu.RUnlock()
 
 	return e.searchInternal(query)
 }
@@ -276,13 +264,15 @@ func (e *Engine) searchInternal(query string) []Result {
 		}
 		results = append(results, e.buildResults(searchResults, MatchDirect, getScorer())...)
 		if goodResults < minDirectResults {
-			fallbackResults := e.categoryFallback(query, searchResults, getScorer())
-			results = append(results, fallbackResults...)
+			if bestCat, ok := e.index.BestCategory(query); ok {
+				fallbackResults := e.categoryFallback(bestCat, searchResults, getScorer())
+				results = append(results, fallbackResults...)
+			}
 		}
 	} else {
 		// Check if any categories match before creating the Scorer.
-		if cats := e.index.SearchCategories(query); len(cats) > 0 {
-			results = append(results, e.categoryFallback(query, nil, getScorer())...)
+		if bestCat, ok := e.index.BestCategory(query); ok {
+			results = append(results, e.categoryFallback(bestCat, nil, getScorer())...)
 		}
 	}
 
@@ -303,8 +293,15 @@ func (e *Engine) searchInternal(query string) []Result {
 // RecordSelection records a user selecting a product.
 func (e *Engine) RecordSelection(productID int) {
 	e.ranker.RecordSelection(productID)
+	if productID < 0 || productID >= len(e.products) {
+		return
+	}
+	category := e.products[productID].Category
 	e.mu.Lock()
-	e.catCacheDirty = true
+	if e.dirtyCats == nil {
+		e.dirtyCats = make(map[string]struct{})
+	}
+	e.dirtyCats[category] = struct{}{}
 	e.mu.Unlock()
 }
 
@@ -472,26 +469,21 @@ func addHighlights(results []Result, query string) {
 	}
 }
 
-// categoryFallback finds the best matching category and returns its top products.
-// Uses a precomputed cache that is rebuilt when popularity changes.
-func (e *Engine) categoryFallback(query string, exclude []index.SearchResult, score scorerFunc) []Result {
-	categories := e.index.SearchCategories(query)
-	if len(categories) == 0 {
+// categoryFallback returns cached products for the chosen category.
+func (e *Engine) categoryFallback(category string, exclude []index.SearchResult, score scorerFunc) []Result {
+	if category == "" {
 		return nil
 	}
-
-	bestCat := categories[0]
-
-	// Check/rebuild category cache
-	e.mu.Lock()
-	if e.catCacheDirty || e.categoryCache == nil {
-		e.rebuildCategoryCache()
+	cached, ok := e.ensureCategoryCached(category, score)
+	if !ok {
+		return nil
 	}
-	cached := e.categoryCache[bestCat]
-	e.mu.Unlock()
 
 	if len(cached) == 0 {
 		return nil
+	}
+	if len(exclude) == 0 {
+		return cached
 	}
 
 	// Build set of already-found product IDs to avoid duplicates
@@ -512,6 +504,76 @@ func (e *Engine) categoryFallback(query string, exclude []index.SearchResult, sc
 	return results
 }
 
+func (e *Engine) ensureCategoryCached(category string, score scorerFunc) ([]Result, bool) {
+	e.mu.RLock()
+	cached, ok := e.categoryCache[category]
+	_, dirty := e.dirtyCats[category]
+	e.mu.RUnlock()
+	if ok && !dirty {
+		return cached, true
+	}
+
+	productIDs := e.index.ProductsByCategory(category)
+	if len(productIDs) == 0 {
+		return nil, false
+	}
+
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	cached, ok = e.categoryCache[category]
+	_, dirty = e.dirtyCats[category]
+	if ok && !dirty {
+		return cached, true
+	}
+
+	if score == nil {
+		score = e.ranker.Scorer()
+	}
+	if e.categoryCache == nil {
+		e.categoryCache = make(map[string][]Result)
+	}
+	cached = e.buildCategoryResults(category, score)
+	e.categoryCache[category] = cached
+	delete(e.dirtyCats, category)
+	return cached, true
+}
+
+func (e *Engine) buildCategoryResults(category string, score scorerFunc) []Result {
+	productIDs := e.index.ProductsByCategory(category)
+	if len(productIDs) == 0 {
+		return nil
+	}
+
+	scored := make([]Result, 0, min(len(productIDs), maxResults*2))
+	catWords := strings.Fields(category)
+	for _, id := range productIDs {
+		if id < 0 || id >= len(e.products) {
+			continue
+		}
+		s := score(id, fallbackRelevance)
+		name := e.products[id].Name
+		hl := computeHighlights(name, catWords, category)
+		scored = append(scored, Result{
+			Product:         e.products[id],
+			ProductID:       id,
+			Score:           s,
+			MatchType:       MatchFallback,
+			Highlights:      hl,
+			HighlightedName: buildHighlightedName(name, hl),
+		})
+	}
+
+	if len(scored) > maxResults {
+		slices.SortFunc(scored, func(a, b Result) int {
+			return cmp.Compare(b.Score, a.Score)
+		})
+		scored = scored[:maxResults]
+	}
+
+	return scored
+}
+
 // rebuildCategoryCache precomputes the top maxResults products per category.
 // Caller must hold e.mu lock.
 func (e *Engine) rebuildCategoryCache() {
@@ -520,44 +582,11 @@ func (e *Engine) rebuildCategoryCache() {
 
 	// Get all unique categories
 	for _, cat := range e.allCategories() {
-		productIDs := e.index.ProductsByCategory(cat)
-		if len(productIDs) == 0 {
-			continue
-		}
-
-		// Score all products in category
-		scored := make([]Result, 0, min(len(productIDs), maxResults*2))
-		catWords := strings.Fields(cat)
-		for _, id := range productIDs {
-			if id < 0 || id >= len(e.products) {
-				continue
-			}
-			s := score(id, fallbackRelevance)
-			name := e.products[id].Name
-			hl := computeHighlights(name, catWords, cat)
-			scored = append(scored, Result{
-				Product:         e.products[id],
-				ProductID:       id,
-				Score:           s,
-				MatchType:       MatchFallback,
-				Highlights:      hl,
-				HighlightedName: buildHighlightedName(name, hl),
-			})
-		}
-
-		// Keep only top maxResults using partial sort via heap-select pattern
-		if len(scored) > maxResults {
-			slices.SortFunc(scored, func(a, b Result) int {
-				return cmp.Compare(b.Score, a.Score)
-			})
-			scored = scored[:maxResults]
-		}
-
-		cache[cat] = scored
+		cache[cat] = e.buildCategoryResults(cat, score)
 	}
 
 	e.categoryCache = cache
-	e.catCacheDirty = false
+	e.dirtyCats = make(map[string]struct{})
 }
 
 // allCategories returns all unique category names.

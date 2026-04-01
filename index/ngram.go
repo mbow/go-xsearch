@@ -45,56 +45,43 @@ type nameEntry struct {
 
 // Index is an n-gram inverted index over a product catalog.
 type Index struct {
-	products    []catalog.Product
-	posting     map[string][]int              // trigram → product IDs
-	trigrams    map[int]map[string]struct{}   // product ID → its trigram set
-	catTrigrams map[string]map[string]struct{} // category → its trigram set
-	catProducts map[string][]int              // category → product IDs
-	sortedNames []nameEntry                   // sorted by lowercased name for binary search
-	hitsPool    sync.Pool                     // reusable []uint8 hit counters
+	products      []catalog.Product
+	posting       map[string][]int               // trigram → product IDs
+	docGramCounts []int                          // product ID → unique trigram count
+	catTrigrams   map[string]map[string]struct{} // category → its trigram set
+	catProducts   map[string][]int               // category → product IDs
+	sortedNames   []nameEntry                    // sorted by lowercased name for binary search
+	hitsPool      sync.Pool                      // reusable []uint8 hit counters
 }
 
 // Snapshot holds the serializable state of an [Index].
 type Snapshot struct {
-	Posting     map[string][]int    `cbor:"posting"`
-	Trigrams    map[int][]string    `cbor:"trigrams"`
-	CatTrigrams map[string][]string `cbor:"cat_trigrams"`
-	CatProducts map[string][]int   `cbor:"cat_products"`
-	SortedNames []nameEntry        `cbor:"sorted_names"`
+	Posting       map[string][]int    `cbor:"posting"`
+	DocGramCounts []int               `cbor:"doc_gram_counts"`
+	Trigrams      map[int][]string    `cbor:"trigrams,omitempty"` // legacy compatibility
+	CatTrigrams   map[string][]string `cbor:"cat_trigrams"`
+	CatProducts   map[string][]int    `cbor:"cat_products"`
+	SortedNames   []nameEntry         `cbor:"sorted_names"`
 }
 
 // ToSnapshot exports the index state for serialization.
 func (idx *Index) ToSnapshot() Snapshot {
-	tris := make(map[int][]string, len(idx.trigrams))
-	for id, grams := range idx.trigrams {
-		tris[id] = slices.Collect(maps.Keys(grams))
-	}
-
 	catTris := make(map[string][]string, len(idx.catTrigrams))
 	for cat, grams := range idx.catTrigrams {
 		catTris[cat] = slices.Collect(maps.Keys(grams))
 	}
 
 	return Snapshot{
-		Posting:     idx.posting,
-		Trigrams:    tris,
-		CatTrigrams: catTris,
-		CatProducts: idx.catProducts,
-		SortedNames: idx.sortedNames,
+		Posting:       idx.posting,
+		DocGramCounts: idx.docGramCounts,
+		CatTrigrams:   catTris,
+		CatProducts:   idx.catProducts,
+		SortedNames:   idx.sortedNames,
 	}
 }
 
 // FromSnapshot restores an [Index] from a serialized [Snapshot] and product list.
 func FromSnapshot(s Snapshot, products []catalog.Product) *Index {
-	trigrams := make(map[int]map[string]struct{}, len(s.Trigrams))
-	for id, grams := range s.Trigrams {
-		m := make(map[string]struct{}, len(grams))
-		for _, g := range grams {
-			m[g] = struct{}{}
-		}
-		trigrams[id] = m
-	}
-
 	catTrigrams := make(map[string]map[string]struct{}, len(s.CatTrigrams))
 	for cat, grams := range s.CatTrigrams {
 		m := make(map[string]struct{}, len(grams))
@@ -105,14 +92,26 @@ func FromSnapshot(s Snapshot, products []catalog.Product) *Index {
 	}
 
 	n := len(products)
+	docGramCounts := make([]int, n)
+	switch {
+	case len(s.DocGramCounts) > 0:
+		copy(docGramCounts, s.DocGramCounts)
+	case len(s.Trigrams) > 0:
+		for id, grams := range s.Trigrams {
+			if id >= 0 && id < n {
+				docGramCounts[id] = len(grams)
+			}
+		}
+	}
+
 	return &Index{
-		products:    products,
-		posting:     s.Posting,
-		trigrams:    trigrams,
-		catTrigrams: catTrigrams,
-		catProducts: s.CatProducts,
-		sortedNames: s.SortedNames,
-		hitsPool:    sync.Pool{New: func() any { s := make([]uint8, n); return &s }},
+		products:      products,
+		posting:       s.Posting,
+		docGramCounts: docGramCounts,
+		catTrigrams:   catTrigrams,
+		catProducts:   s.CatProducts,
+		sortedNames:   s.SortedNames,
+		hitsPool:      sync.Pool{New: func() any { s := make([]uint8, n); return &s }},
 	}
 }
 
@@ -122,12 +121,12 @@ func FromSnapshot(s Snapshot, products []catalog.Product) *Index {
 func NewIndex(products []catalog.Product) *Index {
 	n := len(products)
 	idx := &Index{
-		products:    products,
-		posting:     make(map[string][]int),
-		trigrams:    make(map[int]map[string]struct{}),
-		catTrigrams: make(map[string]map[string]struct{}),
-		catProducts: make(map[string][]int),
-		hitsPool:    sync.Pool{New: func() any { s := make([]uint8, n); return &s }},
+		products:      products,
+		posting:       make(map[string][]int),
+		docGramCounts: make([]int, n),
+		catTrigrams:   make(map[string]map[string]struct{}),
+		catProducts:   make(map[string][]int),
+		hitsPool:      sync.Pool{New: func() any { s := make([]uint8, n); return &s }},
 	}
 
 	for id, p := range products {
@@ -135,9 +134,12 @@ func NewIndex(products []catalog.Product) *Index {
 		for _, tag := range p.Tags {
 			grams = append(grams, ExtractTrigrams(tag)...)
 		}
-		idx.trigrams[id] = make(map[string]struct{}, len(grams))
+		unique := make(map[string]struct{}, len(grams))
 		for _, g := range grams {
-			idx.trigrams[id][g] = struct{}{}
+			unique[g] = struct{}{}
+		}
+		idx.docGramCounts[id] = len(unique)
+		for g := range unique {
 			idx.posting[g] = append(idx.posting[g], id)
 		}
 		idx.catProducts[p.Category] = append(idx.catProducts[p.Category], id)
@@ -246,7 +248,10 @@ func (idx *Index) Search(query string) []SearchResult {
 			continue
 		}
 		intersection := int(h)
-		unionSize := numQueryGrams + len(idx.trigrams[id]) - intersection
+		unionSize := numQueryGrams + idx.docGramCounts[id] - intersection
+		if unionSize <= 0 {
+			continue
+		}
 		results = append(results, SearchResult{
 			ProductID: id,
 			Score:     float64(intersection) / float64(unionSize),
@@ -339,6 +344,52 @@ func (idx *Index) SearchCategories(query string) []string {
 		names[i] = r.name
 	}
 	return names
+}
+
+// BestCategory returns the single best-matching category for query.
+func (idx *Index) BestCategory(query string) (string, bool) {
+	query = strings.ToLower(strings.TrimSpace(query))
+	if query == "" {
+		return "", false
+	}
+
+	queryGrams := ExtractTrigrams(query)
+	if len(queryGrams) == 0 {
+		best := ""
+		for cat := range idx.catProducts {
+			if strings.HasPrefix(cat, query) && (best == "" || cat < best) {
+				best = cat
+			}
+		}
+		return best, best != ""
+	}
+
+	querySet := make(map[string]struct{}, len(queryGrams))
+	for _, g := range queryGrams {
+		querySet[g] = struct{}{}
+	}
+
+	bestName := ""
+	bestScore := 0.0
+	for cat, catGrams := range idx.catTrigrams {
+		intersection := 0
+		for g := range querySet {
+			if _, ok := catGrams[g]; ok {
+				intersection++
+			}
+		}
+		if intersection == 0 {
+			continue
+		}
+		unionSize := len(querySet) + len(catGrams) - intersection
+		score := float64(intersection) / float64(unionSize)
+		if score > bestScore || (score == bestScore && (bestName == "" || cat < bestName)) {
+			bestName = cat
+			bestScore = score
+		}
+	}
+
+	return bestName, bestName != ""
 }
 
 // ProductsByCategory returns the product IDs belonging to the given category.

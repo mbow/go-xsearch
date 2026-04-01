@@ -279,6 +279,15 @@ func BenchmarkIndex_SearchCategories(b *testing.B) {
 	}
 }
 
+func BenchmarkIndex_BestCategory(b *testing.B) {
+	products := benchProducts(b)
+	idx := index.NewIndex(products)
+	b.ResetTimer()
+	for b.Loop() {
+		_, _ = idx.BestCategory("beer")
+	}
+}
+
 func BenchmarkRanking_CombinedScore(b *testing.B) {
 	r := ranking.New(0.05, 0.6)
 	for range 50 {
@@ -295,5 +304,17 @@ func BenchmarkRanking_CombinedScore_NoSelections(b *testing.B) {
 	b.ResetTimer()
 	for b.Loop() {
 		r.CombinedScore(0, 0.8)
+	}
+}
+
+func BenchmarkRanking_Scorer(b *testing.B) {
+	r := ranking.New(0.05, 0.6)
+	for range 50 {
+		r.RecordSelection(0)
+	}
+	b.ResetTimer()
+	for b.Loop() {
+		score := r.Scorer()
+		_ = score(0, 0.8)
 	}
 }
