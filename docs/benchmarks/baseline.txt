@@ -1,6 +1,6 @@
 goos: linux
 goarch: amd64
-pkg: github.com/mbow/go-xsearch
+pkg: github.com/mbow/go-xsearch/benchmarks
 cpu: AMD Ryzen 9 5950X 16-Core Processor            
 BenchmarkBloom_MayContain-32                      	195827002	         6.120 ns/op	       0 B/op	       0 allocs/op
 BenchmarkBloom_MayContain-32                      	195155469	         6.146 ns/op	       0 B/op	       0 allocs/op
