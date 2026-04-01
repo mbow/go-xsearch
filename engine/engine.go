@@ -12,6 +12,7 @@ import (
 	"github.com/mbow/go-xsearch/catalog"
 	"github.com/mbow/go-xsearch/index"
 	"github.com/mbow/go-xsearch/ranking"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -142,26 +143,55 @@ func NewFromEmbedded(products []catalog.Product, bloomRaw, indexRaw, bm25Raw []b
 // prefix that matches at least one product. These are the highest-traffic
 // queries since every search starts with 1-2 characters.
 func (e *Engine) buildPrefixCache() {
-	e.prefixCache = make(map[string][]Result)
-
-	// Collect unique 1-char and 2-char prefixes from product names
-	prefixes := make(map[string]struct{})
+	prefixSet := make(map[string]struct{})
 	for _, p := range e.products {
 		name := strings.ToLower(p.Name)
 		if len(name) >= 1 {
-			prefixes[name[:1]] = struct{}{}
+			prefixSet[name[:1]] = struct{}{}
 		}
 		if len(name) >= 2 {
-			prefixes[name[:2]] = struct{}{}
+			prefixSet[name[:2]] = struct{}{}
 		}
 	}
 
-	// Precompute results for each prefix
-	for prefix := range prefixes {
-		results := e.searchInternal(prefix)
-		if len(results) > 0 {
-			e.prefixCache[prefix] = results
-		}
+	prefixes := make([]string, 0, len(prefixSet))
+	for p := range prefixSet {
+		prefixes = append(prefixes, p)
+	}
+
+	type entry struct {
+		prefix  string
+		results []Result
+	}
+
+	workers := runtime.GOMAXPROCS(0)
+	ch := make(chan string, len(prefixes))
+	resultCh := make(chan entry, len(prefixes))
+
+	var wg sync.WaitGroup
+	for range workers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for prefix := range ch {
+				results := e.searchInternal(prefix)
+				if len(results) > 0 {
+					resultCh <- entry{prefix: prefix, results: results}
+				}
+			}
+		}()
+	}
+
+	for _, p := range prefixes {
+		ch <- p
+	}
+	close(ch)
+	wg.Wait()
+	close(resultCh)
+
+	e.prefixCache = make(map[string][]Result, len(prefixes))
+	for ent := range resultCh {
+		e.prefixCache[ent.prefix] = ent.results
 	}
 }
 
