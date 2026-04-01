@@ -167,8 +167,12 @@ func (r *Ranker) Save(path string) error {
 	if err != nil {
 		return fmt.Errorf("ranking: marshaling selections: %w", err)
 	}
-	if err := os.WriteFile(path, data, 0644); err != nil {
-		return fmt.Errorf("ranking: writing %s: %w", path, err)
+	tmpPath := path + ".tmp"
+	if err := os.WriteFile(tmpPath, data, 0644); err != nil {
+		return fmt.Errorf("ranking: writing %s: %w", tmpPath, err)
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		return fmt.Errorf("ranking: atomically renaming %s: %w", path, err)
 	}
 	return nil
 }

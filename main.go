@@ -65,7 +65,9 @@ func main() {
 	// Prune old data and start periodic snapshots
 	app.Engine.Ranker().Prune(90)
 	go func() {
-		for range time.Tick(snapshotPeriod) {
+		ticker := time.NewTicker(snapshotPeriod)
+		defer ticker.Stop()
+		for range ticker.C {
 			if err := app.Engine.Ranker().Save(popPath); err != nil {
 				log.Printf("error saving popularity data: %v", err)
 			}
