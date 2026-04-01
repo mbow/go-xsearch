@@ -6,6 +6,7 @@ package engine
 import (
 	"cmp"
 	"fmt"
+	"html"
 	"maps"
 	"github.com/mbow/go-xsearch/bm25"
 	"github.com/mbow/go-xsearch/bloom"
@@ -28,12 +29,20 @@ const (
 	MatchFallback                  // Found via category fallback
 )
 
+// Highlight marks a matched byte range within a product name.
+type Highlight struct {
+	Start int // byte offset (inclusive)
+	End   int // byte offset (exclusive)
+}
+
 // Result is a single search result with metadata.
 type Result struct {
-	Product   catalog.Product
-	ProductID int
-	Score     float64
-	MatchType MatchType
+	Product         catalog.Product
+	ProductID       int
+	Score           float64
+	MatchType       MatchType
+	Highlights      []Highlight
+	HighlightedName string
 }
 
 // Engine orchestrates search across all components.
@@ -248,13 +257,13 @@ func (e *Engine) searchInternal(query string) []Result {
 	// Try BM25 path first (word-level matching)
 	bm25Results := e.bm25idx.Search(query)
 	if len(bm25Results) > 0 {
-		return e.buildBM25Results(bm25Results, score)
+		return e.buildBM25Results(bm25Results, score, query)
 	}
 
 	// Fallback to Jaccard trigram path (handles typos/fuzzy)
 	trigrams := index.ExtractTrigrams(query)
 	if len(trigrams) == 0 {
-		return e.buildResults(e.index.Search(query), MatchDirect, score)
+		return e.buildResults(e.index.Search(query), MatchDirect, score, query)
 	}
 
 	anyPass := false
@@ -276,7 +285,7 @@ func (e *Engine) searchInternal(query string) []Result {
 				goodResults++
 			}
 		}
-		results = append(results, e.buildResults(searchResults, MatchDirect, score)...)
+		results = append(results, e.buildResults(searchResults, MatchDirect, score, query)...)
 		if goodResults < minDirectResults {
 			fallbackResults := e.categoryFallback(query, searchResults, score)
 			results = append(results, fallbackResults...)
@@ -318,9 +327,79 @@ func (e *Engine) Ranker() *ranking.Ranker {
 // scorerFunc scores a product given its ID and relevance.
 type scorerFunc func(productID int, relevance float64) float64
 
+// computeHighlights finds byte positions of query matches in the product name.
+func computeHighlights(name, query string) []Highlight {
+	lowerName := strings.ToLower(name)
+	lowerQuery := strings.ToLower(query)
+
+	// Try to find each query word in the product name.
+	words := strings.Fields(lowerQuery)
+	var highlights []Highlight
+	for _, word := range words {
+		idx := strings.Index(lowerName, word)
+		if idx >= 0 {
+			highlights = append(highlights, Highlight{Start: idx, End: idx + len(word)})
+		}
+	}
+
+	// If no word matches, try the full query as a substring.
+	if len(highlights) == 0 {
+		idx := strings.Index(lowerName, lowerQuery)
+		if idx >= 0 {
+			highlights = append(highlights, Highlight{Start: idx, End: idx + len(lowerQuery)})
+		}
+	}
+
+	// Sort by start position and merge overlaps.
+	slices.SortFunc(highlights, func(a, b Highlight) int {
+		return cmp.Compare(a.Start, b.Start)
+	})
+	return mergeHighlights(highlights)
+}
+
+// mergeHighlights merges overlapping or adjacent highlight ranges.
+func mergeHighlights(hs []Highlight) []Highlight {
+	if len(hs) <= 1 {
+		return hs
+	}
+	merged := []Highlight{hs[0]}
+	for _, h := range hs[1:] {
+		last := &merged[len(merged)-1]
+		if h.Start <= last.End {
+			last.End = max(last.End, h.End)
+		} else {
+			merged = append(merged, h)
+		}
+	}
+	return merged
+}
+
+// buildHighlightedName renders product name with <mark> tags around matched portions.
+func buildHighlightedName(name string, highlights []Highlight) string {
+	if len(highlights) == 0 {
+		return html.EscapeString(name)
+	}
+
+	var b strings.Builder
+	prev := 0
+	for _, h := range highlights {
+		if h.Start > prev {
+			b.WriteString(html.EscapeString(name[prev:h.Start]))
+		}
+		b.WriteString("<mark>")
+		b.WriteString(html.EscapeString(name[h.Start:h.End]))
+		b.WriteString("</mark>")
+		prev = h.End
+	}
+	if prev < len(name) {
+		b.WriteString(html.EscapeString(name[prev:]))
+	}
+	return b.String()
+}
+
 // buildBM25Results converts BM25 search results to engine results,
 // normalizing BM25 scores and blending with prefix boost and popularity.
-func (e *Engine) buildBM25Results(bm25Results []bm25.SearchResult, score scorerFunc) []Result {
+func (e *Engine) buildBM25Results(bm25Results []bm25.SearchResult, score scorerFunc, query string) []Result {
 	maxBM25 := 0.0
 	for _, r := range bm25Results {
 		if r.Score > maxBM25 {
@@ -346,11 +425,14 @@ func (e *Engine) buildBM25Results(bm25Results []bm25.SearchResult, score scorerF
 		popScore := score(r.ProductID, 0)
 		combined := bm25Alpha*normalizedBM25 + bm25PrefixAlpha*prefixBoost + bm25PopAlpha*popScore
 
+		hl := computeHighlights(e.products[r.ProductID].Name, query)
 		results = append(results, Result{
-			Product:   e.products[r.ProductID],
-			ProductID: r.ProductID,
-			Score:     combined,
-			MatchType: MatchDirect,
+			Product:         e.products[r.ProductID],
+			ProductID:       r.ProductID,
+			Score:           combined,
+			MatchType:       MatchDirect,
+			Highlights:      hl,
+			HighlightedName: buildHighlightedName(e.products[r.ProductID].Name, hl),
 		})
 	}
 
@@ -367,18 +449,21 @@ func (e *Engine) buildBM25Results(bm25Results []bm25.SearchResult, score scorerF
 }
 
 // buildResults converts index search results to engine results with combined scores.
-func (e *Engine) buildResults(searchResults []index.SearchResult, matchType MatchType, score scorerFunc) []Result {
+func (e *Engine) buildResults(searchResults []index.SearchResult, matchType MatchType, score scorerFunc, query string) []Result {
 	results := make([]Result, 0, len(searchResults))
 	for _, sr := range searchResults {
 		if sr.ProductID < 0 || sr.ProductID >= len(e.products) {
 			continue
 		}
 		s := score(sr.ProductID, sr.Score)
+		hl := computeHighlights(e.products[sr.ProductID].Name, query)
 		results = append(results, Result{
-			Product:   e.products[sr.ProductID],
-			ProductID: sr.ProductID,
-			Score:     s,
-			MatchType: matchType,
+			Product:         e.products[sr.ProductID],
+			ProductID:       sr.ProductID,
+			Score:           s,
+			MatchType:       matchType,
+			Highlights:      hl,
+			HighlightedName: buildHighlightedName(e.products[sr.ProductID].Name, hl),
 		})
 	}
 	return results
@@ -445,10 +530,11 @@ func (e *Engine) rebuildCategoryCache() {
 			}
 			s := score(id, fallbackRelevance)
 			scored = append(scored, Result{
-				Product:   e.products[id],
-				ProductID: id,
-				Score:     s,
-				MatchType: MatchFallback,
+				Product:         e.products[id],
+				ProductID:       id,
+				Score:           s,
+				MatchType:       MatchFallback,
+				HighlightedName: html.EscapeString(e.products[id].Name),
 			})
 		}
 

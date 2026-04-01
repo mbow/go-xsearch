@@ -130,6 +130,34 @@ func TestSearchRecordAndRank(t *testing.T) {
 	}
 }
 
+func TestSearchHighlighting(t *testing.T) {
+	products := []catalog.Product{
+		{Name: "Budweiser", Category: "beer"},
+		{Name: "Bud Light", Category: "beer"},
+		{Name: "Miller Lite", Category: "beer"},
+	}
+
+	e := New(products)
+	results := e.Search("bud")
+	if len(results) == 0 {
+		t.Fatal("expected results for 'bud'")
+	}
+
+	first := results[0]
+	if len(first.Highlights) == 0 {
+		t.Error("expected highlights on first result")
+	}
+	if first.Highlights[0].Start != 0 {
+		t.Errorf("expected highlight start at 0, got %d", first.Highlights[0].Start)
+	}
+	if first.Highlights[0].End != 3 {
+		t.Errorf("expected highlight end at 3, got %d", first.Highlights[0].End)
+	}
+	if first.HighlightedName == "" {
+		t.Error("expected non-empty HighlightedName")
+	}
+}
+
 func TestSearchBudRanking(t *testing.T) {
 	products := []catalog.Product{
 		{Name: "Budweiser", Category: "beer"},

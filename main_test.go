@@ -51,8 +51,8 @@ func TestHandleSearch(t *testing.T) {
 		t.Errorf("expected 200, got %d", w.Code)
 	}
 	body := w.Body.String()
-	if !strings.Contains(body, "Nike Air Max") {
-		t.Error("expected results to contain 'Nike Air Max'")
+	if !strings.Contains(body, "Nik") || !strings.Contains(body, "Air Max") {
+		t.Error("expected results to contain 'Nike Air Max' (possibly highlighted)")
 	}
 }
 

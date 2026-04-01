@@ -79,8 +79,11 @@ func (c *fragmentCache) invalidate() {
 }
 
 func (app *App) loadTemplates() {
-	app.indexTmpl = template.Must(template.ParseFiles("templates/index.html"))
-	app.resultTmpl = template.Must(template.ParseFiles("templates/results.html"))
+	funcMap := template.FuncMap{
+		"safe": func(s string) template.HTML { return template.HTML(s) },
+	}
+	app.indexTmpl = template.Must(template.New("index.html").Funcs(funcMap).ParseFiles("templates/index.html"))
+	app.resultTmpl = template.Must(template.New("results.html").Funcs(funcMap).ParseFiles("templates/results.html"))
 }
 
 func (app *App) handleIndex(w http.ResponseWriter, r *http.Request) {
