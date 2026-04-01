@@ -55,8 +55,7 @@ type Engine struct {
 	prefixCache   map[string][]Result // precomputed results for 1-2 char prefixes
 	categoryCache map[string][]Result // precomputed top-N per category
 	catCacheDirty bool                // true when selections have changed
-	mu            sync.RWMutex       // protects categoryCache and catCacheDirty
-	resultPool    sync.Pool
+	mu            sync.RWMutex        // protects categoryCache and catCacheDirty
 }
 
 const (
@@ -68,8 +67,7 @@ const (
 	minDirectResults  = 3
 	fallbackRelevance = 0.1
 	maxResults        = 10
-	bm25Alpha         = 0.5 // BM25 score weight
-	bm25PrefixAlpha   = 0.2 // prefix boost weight
+	bm25Alpha         = 0.7 // BM25 score weight (includes internal prefix bonus)
 	bm25PopAlpha      = 0.3 // popularity weight in BM25 path
 )
 
@@ -81,9 +79,6 @@ func New(products []catalog.Product) *Engine {
 		index:    index.NewIndex(products),
 		ranker:   ranking.New(lambda, alpha),
 		bm25idx:  bm25.NewIndex(products),
-		resultPool: sync.Pool{
-			New: func() any { s := make([]Result, 0, maxResults); return &s },
-		},
 	}
 
 	// Populate Bloom filter with all product, category, and tag trigrams
@@ -137,9 +132,6 @@ func NewFromEmbedded(products []catalog.Product, bloomRaw, indexRaw, bm25Raw []b
 		index:    index.FromSnapshot(is, products),
 		ranker:   ranking.New(lambda, alpha),
 		bm25idx:  bm25Idx,
-		resultPool: sync.Pool{
-			New: func() any { s := make([]Result, 0, maxResults); return &s },
-		},
 	}
 
 	e.buildPrefixCache()
@@ -204,17 +196,6 @@ func (e *Engine) buildPrefixCache() {
 	}
 }
 
-// getResults gets a result slice from the pool.
-func (e *Engine) getResults() *[]Result {
-	return e.resultPool.Get().(*[]Result)
-}
-
-// putResults returns a result slice to the pool.
-func (e *Engine) putResults(r *[]Result) {
-	*r = (*r)[:0]
-	e.resultPool.Put(r)
-}
-
 // Search returns ranked results for the given query.
 func (e *Engine) Search(query string) []Result {
 	if query == "" {
@@ -274,8 +255,7 @@ func (e *Engine) searchInternal(query string) []Result {
 		}
 	}
 
-	pooled := e.getResults()
-	results := *pooled
+	results := make([]Result, 0, maxResults)
 
 	if anyPass {
 		searchResults := e.index.Search(query)
@@ -302,13 +282,7 @@ func (e *Engine) searchInternal(query string) []Result {
 		results = results[:maxResults]
 	}
 
-	out := make([]Result, len(results))
-	copy(out, results)
-
-	*pooled = results
-	e.putResults(pooled)
-
-	return out
+	return results
 }
 
 // RecordSelection records a user selecting a product.
@@ -421,13 +395,8 @@ func (e *Engine) buildBM25Results(bm25Results []bm25.SearchResult, score scorerF
 		}
 
 		normalizedBM25 := r.Score / maxBM25
-		prefixBoost := 0.0
-		if r.PrefixMatch {
-			prefixBoost = 1.0
-		}
-
 		popScore := score(r.ProductID, 0)
-		combined := bm25Alpha*normalizedBM25 + bm25PrefixAlpha*prefixBoost + bm25PopAlpha*popScore
+		combined := bm25Alpha*normalizedBM25 + bm25PopAlpha*popScore
 
 		hl := computeHighlights(e.products[r.ProductID].Name, queryWords, query)
 		results = append(results, Result{
@@ -531,17 +500,21 @@ func (e *Engine) rebuildCategoryCache() {
 
 		// Score all products in category
 		scored := make([]Result, 0, min(len(productIDs), maxResults*2))
+		catWords := strings.Fields(cat)
 		for _, id := range productIDs {
 			if id < 0 || id >= len(e.products) {
 				continue
 			}
 			s := score(id, fallbackRelevance)
+			name := e.products[id].Name
+			hl := computeHighlights(name, catWords, cat)
 			scored = append(scored, Result{
 				Product:         e.products[id],
 				ProductID:       id,
 				Score:           s,
 				MatchType:       MatchFallback,
-				HighlightedName: html.EscapeString(e.products[id].Name),
+				Highlights:      hl,
+				HighlightedName: buildHighlightedName(name, hl),
 			})
 		}
 
