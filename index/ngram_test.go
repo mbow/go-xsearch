@@ -164,6 +164,38 @@ func TestProductsByCategory(t *testing.T) {
 	}
 }
 
+func TestPrefixSearchBinarySearch(t *testing.T) {
+	products := []catalog.Product{
+		{Name: "Apple Juice", Category: "drinks"},
+		{Name: "Banana Split", Category: "dessert"},
+		{Name: "Blueberry Muffin", Category: "bakery"},
+		{Name: "Cherry Pie", Category: "bakery"},
+	}
+	idx := NewIndex(products)
+
+	results := idx.Search("bl")
+	found := false
+	for _, r := range results {
+		if r.ProductID == 2 {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected to find Blueberry Muffin for prefix 'bl'")
+	}
+
+	results = idx.Search("b")
+	bCount := 0
+	for _, r := range results {
+		if r.ProductID == 1 || r.ProductID == 2 {
+			bCount++
+		}
+	}
+	if bCount < 2 {
+		t.Errorf("expected Banana and Blueberry for prefix 'b', found %d", bCount)
+	}
+}
+
 func TestSearchSaturationSafety(t *testing.T) {
 	longName := "abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz"
 	products := []catalog.Product{

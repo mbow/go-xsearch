@@ -12,6 +12,7 @@ import (
 	"maps"
 	"github.com/mbow/go-xsearch/catalog"
 	"slices"
+	"sort"
 	"strings"
 	"sync"
 )
@@ -37,6 +38,11 @@ type SearchResult struct {
 	Score     float64
 }
 
+type nameEntry struct {
+	Name string `cbor:"name"`
+	ID   int    `cbor:"id"`
+}
+
 // Index is an n-gram inverted index over a product catalog.
 type Index struct {
 	products    []catalog.Product
@@ -44,6 +50,7 @@ type Index struct {
 	trigrams    map[int]map[string]struct{}   // product ID → its trigram set
 	catTrigrams map[string]map[string]struct{} // category → its trigram set
 	catProducts map[string][]int              // category → product IDs
+	sortedNames []nameEntry                   // sorted by lowercased name for binary search
 	hitsPool    sync.Pool                     // reusable []uint8 hit counters
 }
 
@@ -53,6 +60,7 @@ type Snapshot struct {
 	Trigrams    map[int][]string    `cbor:"trigrams"`
 	CatTrigrams map[string][]string `cbor:"cat_trigrams"`
 	CatProducts map[string][]int   `cbor:"cat_products"`
+	SortedNames []nameEntry        `cbor:"sorted_names"`
 }
 
 // ToSnapshot exports the index state for serialization.
@@ -72,6 +80,7 @@ func (idx *Index) ToSnapshot() Snapshot {
 		Trigrams:    tris,
 		CatTrigrams: catTris,
 		CatProducts: idx.catProducts,
+		SortedNames: idx.sortedNames,
 	}
 }
 
@@ -102,6 +111,7 @@ func FromSnapshot(s Snapshot, products []catalog.Product) *Index {
 		trigrams:    trigrams,
 		catTrigrams: catTrigrams,
 		catProducts: s.CatProducts,
+		sortedNames: s.SortedNames,
 		hitsPool:    sync.Pool{New: func() any { s := make([]uint8, n); return &s }},
 	}
 }
@@ -140,6 +150,14 @@ func NewIndex(products []catalog.Product) *Index {
 			idx.catTrigrams[cat][g] = struct{}{}
 		}
 	}
+
+	idx.sortedNames = make([]nameEntry, n)
+	for i, p := range products {
+		idx.sortedNames[i] = nameEntry{Name: strings.ToLower(p.Name), ID: i}
+	}
+	slices.SortFunc(idx.sortedNames, func(a, b nameEntry) int {
+		return cmp.Compare(a.Name, b.Name)
+	})
 
 	return idx
 }
@@ -243,14 +261,23 @@ func (idx *Index) Search(query string) []SearchResult {
 	return results
 }
 
-// prefixSearch does a linear scan for products whose lowercased name
-// starts with the given short query.
+// prefixSearch uses binary search on the sorted name array to find products
+// whose lowercased name starts with the given short query.
 func (idx *Index) prefixSearch(query string) []SearchResult {
+	n := len(idx.sortedNames)
+	lo := sort.Search(n, func(i int) bool {
+		return idx.sortedNames[i].Name >= query
+	})
+
 	var results []SearchResult
-	for id, p := range idx.products {
-		if strings.HasPrefix(strings.ToLower(p.Name), query) {
-			results = append(results, SearchResult{ProductID: id, Score: 1.0})
+	for i := lo; i < n; i++ {
+		if !strings.HasPrefix(idx.sortedNames[i].Name, query) {
+			break
 		}
+		results = append(results, SearchResult{
+			ProductID: idx.sortedNames[i].ID,
+			Score:     1.0,
+		})
 	}
 	return results
 }
