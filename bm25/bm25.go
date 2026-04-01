@@ -67,6 +67,7 @@ type Index struct {
 	prefixPosting  map[string][]int        // prefix → product IDs (inverted index for fast prefix lookup)
 	posting        map[string][]int
 	seenPool       sync.Pool
+	candidatesPool sync.Pool
 	k1             float64
 	b              float64
 }
@@ -175,6 +176,7 @@ func NewIndex(products []catalog.Product) *Index {
 	}
 
 	idx.seenPool = sync.Pool{New: func() any { s := make([]bool, n); return &s }}
+	idx.candidatesPool = sync.Pool{New: func() any { s := make([]int, 0, 64); return &s }}
 
 	return idx
 }
@@ -229,7 +231,8 @@ func (idx *Index) Search(query string) []SearchResult {
 	// Collect candidates from term posting lists and prefix posting lists.
 	seenPtr := idx.seenPool.Get().(*[]bool)
 	seen := *seenPtr
-	var candidates []int
+	candidatesPtr := idx.candidatesPool.Get().(*[]int)
+	candidates := (*candidatesPtr)[:0]
 
 	for _, term := range queryTerms {
 		for _, id := range idx.posting[term] {
@@ -247,7 +250,12 @@ func (idx *Index) Search(query string) []SearchResult {
 	}
 
 	if len(candidates) == 0 {
+		for _, id := range candidates {
+			seen[id] = false
+		}
 		idx.seenPool.Put(seenPtr)
+		*candidatesPtr = candidates
+		idx.candidatesPool.Put(candidatesPtr)
 		return nil
 	}
 
@@ -297,6 +305,8 @@ func (idx *Index) Search(query string) []SearchResult {
 		seen[id] = false
 	}
 	idx.seenPool.Put(seenPtr)
+	*candidatesPtr = candidates
+	idx.candidatesPool.Put(candidatesPtr)
 
 	// Drain heap in descending score order.
 	results := make([]SearchResult, hLen)
@@ -380,5 +390,6 @@ func FromSnapshot(s Snapshot) (*Index, error) {
 		b:             s.B,
 	}
 	idx.seenPool = sync.Pool{New: func() any { s := make([]bool, n); return &s }}
+	idx.candidatesPool = sync.Pool{New: func() any { s := make([]int, 0, 64); return &s }}
 	return idx, nil
 }
