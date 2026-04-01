@@ -72,8 +72,7 @@ even at scale.
 
 ## Performance
 
-Benchmarked on an AMD Ryzen 9 5950X with **10,035 products** (10,000 beers +
-spirits, shoes, phones, headphones, sodas):
+Benchmarked on an AMD Ryzen 9 5950X with 10,000 beers.
 
 | Query Type                    | Example             |       Time | Allocations |
 | ----------------------------- | ------------------- | ---------: | ----------: |
