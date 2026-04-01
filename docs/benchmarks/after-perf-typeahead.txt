@@ -1,0 +1,198 @@
+goos: linux
+goarch: amd64
+pkg: github.com/mbow/go-xsearch
+cpu: AMD Ryzen 9 5950X 16-Core Processor            
+BenchmarkBloomMayContain-32                      	196961277	         6.077 ns/op	       0 B/op	       0 allocs/op
+BenchmarkBloomMayContain-32                      	197878342	         6.075 ns/op	       0 B/op	       0 allocs/op
+BenchmarkBloomMayContain-32                      	195790816	         6.113 ns/op	       0 B/op	       0 allocs/op
+BenchmarkBloomMayContain-32                      	196889173	         6.095 ns/op	       0 B/op	       0 allocs/op
+BenchmarkBloomMayContain-32                      	197318113	         6.096 ns/op	       0 B/op	       0 allocs/op
+BenchmarkBloomMayContain-32                      	196744005	         6.076 ns/op	       0 B/op	       0 allocs/op
+BenchmarkBloomMiss-32                            	288709586	         4.141 ns/op	       0 B/op	       0 allocs/op
+BenchmarkBloomMiss-32                            	288430642	         4.138 ns/op	       0 B/op	       0 allocs/op
+BenchmarkBloomMiss-32                            	285287083	         4.167 ns/op	       0 B/op	       0 allocs/op
+BenchmarkBloomMiss-32                            	286079658	         4.171 ns/op	       0 B/op	       0 allocs/op
+BenchmarkBloomMiss-32                            	290006650	         4.134 ns/op	       0 B/op	       0 allocs/op
+BenchmarkBloomMiss-32                            	289426616	         4.136 ns/op	       0 B/op	       0 allocs/op
+BenchmarkExtractTrigrams_Short-32                	47197064	        21.92 ns/op	      16 B/op	       1 allocs/op
+BenchmarkExtractTrigrams_Short-32                	53045383	        22.00 ns/op	      16 B/op	       1 allocs/op
+BenchmarkExtractTrigrams_Short-32                	50083496	        22.15 ns/op	      16 B/op	       1 allocs/op
+BenchmarkExtractTrigrams_Short-32                	51225103	        22.47 ns/op	      16 B/op	       1 allocs/op
+BenchmarkExtractTrigrams_Short-32                	50321157	        21.98 ns/op	      16 B/op	       1 allocs/op
+BenchmarkExtractTrigrams_Short-32                	45186406	        22.30 ns/op	      16 B/op	       1 allocs/op
+BenchmarkExtractTrigrams_Medium-32               	25986708	        44.36 ns/op	     112 B/op	       1 allocs/op
+BenchmarkExtractTrigrams_Medium-32               	27130159	        44.74 ns/op	     112 B/op	       1 allocs/op
+BenchmarkExtractTrigrams_Medium-32               	27049483	        45.98 ns/op	     112 B/op	       1 allocs/op
+BenchmarkExtractTrigrams_Medium-32               	26919746	        43.98 ns/op	     112 B/op	       1 allocs/op
+BenchmarkExtractTrigrams_Medium-32               	28274510	        43.75 ns/op	     112 B/op	       1 allocs/op
+BenchmarkExtractTrigrams_Medium-32               	26736255	        44.65 ns/op	     112 B/op	       1 allocs/op
+BenchmarkExtractTrigrams_Long-32                 	10200788	       118.4 ns/op	     448 B/op	       1 allocs/op
+BenchmarkExtractTrigrams_Long-32                 	10226698	       115.6 ns/op	     448 B/op	       1 allocs/op
+BenchmarkExtractTrigrams_Long-32                 	10325402	       115.7 ns/op	     448 B/op	       1 allocs/op
+BenchmarkExtractTrigrams_Long-32                 	10581506	       119.7 ns/op	     448 B/op	       1 allocs/op
+BenchmarkExtractTrigrams_Long-32                 	10166600	       115.3 ns/op	     448 B/op	       1 allocs/op
+BenchmarkExtractTrigrams_Long-32                 	10538888	       115.7 ns/op	     448 B/op	       1 allocs/op
+BenchmarkIndexSearch_Prefix-32                   	 7145460	       161.3 ns/op	      48 B/op	       2 allocs/op
+BenchmarkIndexSearch_Prefix-32                   	 7567542	       160.5 ns/op	      48 B/op	       2 allocs/op
+BenchmarkIndexSearch_Prefix-32                   	 7363812	       160.2 ns/op	      48 B/op	       2 allocs/op
+BenchmarkIndexSearch_Prefix-32                   	 7119613	       163.7 ns/op	      48 B/op	       2 allocs/op
+BenchmarkIndexSearch_Prefix-32                   	 7337553	       160.1 ns/op	      48 B/op	       2 allocs/op
+BenchmarkIndexSearch_Prefix-32                   	 7373367	       160.7 ns/op	      48 B/op	       2 allocs/op
+BenchmarkIndexSearch_Fuzzy-32                    	 1443115	       834.7 ns/op	    1257 B/op	       9 allocs/op
+BenchmarkIndexSearch_Fuzzy-32                    	 1371702	       872.1 ns/op	    1257 B/op	       9 allocs/op
+BenchmarkIndexSearch_Fuzzy-32                    	 1392296	       859.6 ns/op	    1257 B/op	       9 allocs/op
+BenchmarkIndexSearch_Fuzzy-32                    	 1393912	       858.6 ns/op	    1257 B/op	       9 allocs/op
+BenchmarkIndexSearch_Fuzzy-32                    	 1397122	       857.8 ns/op	    1257 B/op	       9 allocs/op
+BenchmarkIndexSearch_Fuzzy-32                    	 1395366	       863.3 ns/op	    1257 B/op	       9 allocs/op
+BenchmarkIndexSearch_Exact-32                    	  691354	      1795 ns/op	    1497 B/op	      11 allocs/op
+BenchmarkIndexSearch_Exact-32                    	  700202	      1763 ns/op	    1497 B/op	      11 allocs/op
+BenchmarkIndexSearch_Exact-32                    	  709674	      1775 ns/op	    1497 B/op	      11 allocs/op
+BenchmarkIndexSearch_Exact-32                    	  681618	      1773 ns/op	    1497 B/op	      11 allocs/op
+BenchmarkIndexSearch_Exact-32                    	  705531	      1817 ns/op	    1497 B/op	      11 allocs/op
+BenchmarkIndexSearch_Exact-32                    	  683710	      1763 ns/op	    1497 B/op	      11 allocs/op
+BenchmarkIndexSearch_ShortQuery-32               	  122500	      9599 ns/op	   50368 B/op	      10 allocs/op
+BenchmarkIndexSearch_ShortQuery-32               	  107348	      9807 ns/op	   50368 B/op	      10 allocs/op
+BenchmarkIndexSearch_ShortQuery-32               	  107683	      9533 ns/op	   50368 B/op	      10 allocs/op
+BenchmarkIndexSearch_ShortQuery-32               	  106826	      9521 ns/op	   50368 B/op	      10 allocs/op
+BenchmarkIndexSearch_ShortQuery-32               	  112878	      9477 ns/op	   50368 B/op	      10 allocs/op
+BenchmarkIndexSearch_ShortQuery-32               	  111170	      9568 ns/op	   50368 B/op	      10 allocs/op
+BenchmarkIndexSearchCategories-32                	 1386164	       862.9 ns/op	      72 B/op	       3 allocs/op
+BenchmarkIndexSearchCategories-32                	 1390753	       861.4 ns/op	      72 B/op	       3 allocs/op
+BenchmarkIndexSearchCategories-32                	 1391467	       860.4 ns/op	      72 B/op	       3 allocs/op
+BenchmarkIndexSearchCategories-32                	 1375902	       871.8 ns/op	      72 B/op	       3 allocs/op
+BenchmarkIndexSearchCategories-32                	 1390573	       861.2 ns/op	      72 B/op	       3 allocs/op
+BenchmarkIndexSearchCategories-32                	 1383370	       865.7 ns/op	      72 B/op	       3 allocs/op
+BenchmarkRankingCombinedScore-32                 	 1732143	       693.7 ns/op	       0 B/op	       0 allocs/op
+BenchmarkRankingCombinedScore-32                 	 1706167	       701.2 ns/op	       0 B/op	       0 allocs/op
+BenchmarkRankingCombinedScore-32                 	 1722037	       697.7 ns/op	       0 B/op	       0 allocs/op
+BenchmarkRankingCombinedScore-32                 	 1723864	       694.7 ns/op	       0 B/op	       0 allocs/op
+BenchmarkRankingCombinedScore-32                 	 1707015	       700.1 ns/op	       0 B/op	       0 allocs/op
+BenchmarkRankingCombinedScore-32                 	 1729845	       694.3 ns/op	       0 B/op	       0 allocs/op
+BenchmarkRankingCombinedScore_NoSelections-32    	26833221	        44.99 ns/op	       0 B/op	       0 allocs/op
+BenchmarkRankingCombinedScore_NoSelections-32    	26678158	        44.69 ns/op	       0 B/op	       0 allocs/op
+BenchmarkRankingCombinedScore_NoSelections-32    	27111066	        44.15 ns/op	       0 B/op	       0 allocs/op
+BenchmarkRankingCombinedScore_NoSelections-32    	26123431	        44.41 ns/op	       0 B/op	       0 allocs/op
+BenchmarkRankingCombinedScore_NoSelections-32    	26756590	        44.58 ns/op	       0 B/op	       0 allocs/op
+BenchmarkRankingCombinedScore_NoSelections-32    	26586997	        44.25 ns/op	       0 B/op	       0 allocs/op
+BenchmarkEngineSearch_Prefix3Char-32             	 1149202	      1037 ns/op	    1041 B/op	      26 allocs/op
+BenchmarkEngineSearch_Prefix3Char-32             	 1153827	      1032 ns/op	    1041 B/op	      26 allocs/op
+BenchmarkEngineSearch_Prefix3Char-32             	 1148538	      1035 ns/op	    1041 B/op	      26 allocs/op
+BenchmarkEngineSearch_Prefix3Char-32             	 1152675	      1031 ns/op	    1041 B/op	      26 allocs/op
+BenchmarkEngineSearch_Prefix3Char-32             	 1137784	      1049 ns/op	    1041 B/op	      26 allocs/op
+BenchmarkEngineSearch_Prefix3Char-32             	 1159467	      1028 ns/op	    1041 B/op	      26 allocs/op
+BenchmarkEngineSearch_Fuzzy-32                   	  363024	      2836 ns/op	    1564 B/op	      15 allocs/op
+BenchmarkEngineSearch_Fuzzy-32                   	  443068	      2752 ns/op	    1564 B/op	      15 allocs/op
+BenchmarkEngineSearch_Fuzzy-32                   	  419037	      2766 ns/op	    1564 B/op	      15 allocs/op
+BenchmarkEngineSearch_Fuzzy-32                   	  435660	      2766 ns/op	    1564 B/op	      15 allocs/op
+BenchmarkEngineSearch_Fuzzy-32                   	  435988	      2767 ns/op	    1564 B/op	      15 allocs/op
+BenchmarkEngineSearch_Fuzzy-32                   	  428726	      2795 ns/op	    1564 B/op	      15 allocs/op
+BenchmarkEngineSearch_CachedPrefix-32            	83974142	        14.09 ns/op	       0 B/op	       0 allocs/op
+BenchmarkEngineSearch_CachedPrefix-32            	92568428	        12.78 ns/op	       0 B/op	       0 allocs/op
+BenchmarkEngineSearch_CachedPrefix-32            	89497370	        12.60 ns/op	       0 B/op	       0 allocs/op
+BenchmarkEngineSearch_CachedPrefix-32            	93342559	        12.61 ns/op	       0 B/op	       0 allocs/op
+BenchmarkEngineSearch_CachedPrefix-32            	94348226	        12.64 ns/op	       0 B/op	       0 allocs/op
+BenchmarkEngineSearch_CachedPrefix-32            	91412670	        12.78 ns/op	       0 B/op	       0 allocs/op
+BenchmarkEngineSearch_CategoryFallback-32        	73994378	        16.12 ns/op	       0 B/op	       0 allocs/op
+BenchmarkEngineSearch_CategoryFallback-32        	73435147	        16.12 ns/op	       0 B/op	       0 allocs/op
+BenchmarkEngineSearch_CategoryFallback-32        	71500531	        16.14 ns/op	       0 B/op	       0 allocs/op
+BenchmarkEngineSearch_CategoryFallback-32        	68207751	        18.00 ns/op	       0 B/op	       0 allocs/op
+BenchmarkEngineSearch_CategoryFallback-32        	72961899	        16.12 ns/op	       0 B/op	       0 allocs/op
+BenchmarkEngineSearch_CategoryFallback-32        	76202986	        16.06 ns/op	       0 B/op	       0 allocs/op
+BenchmarkEngineSearch_BloomReject-32             	  777852	      1496 ns/op	     240 B/op	       6 allocs/op
+BenchmarkEngineSearch_BloomReject-32             	  793131	      1458 ns/op	     240 B/op	       6 allocs/op
+BenchmarkEngineSearch_BloomReject-32             	  780878	      1482 ns/op	     240 B/op	       6 allocs/op
+BenchmarkEngineSearch_BloomReject-32             	  806449	      1460 ns/op	     240 B/op	       6 allocs/op
+BenchmarkEngineSearch_BloomReject-32             	  798181	      1491 ns/op	     240 B/op	       6 allocs/op
+BenchmarkEngineSearch_BloomReject-32             	  817767	      1476 ns/op	     240 B/op	       6 allocs/op
+BenchmarkEngineSearch_WithPopularity-32          	  175416	      6780 ns/op	    3905 B/op	      32 allocs/op
+BenchmarkEngineSearch_WithPopularity-32          	  177349	      6814 ns/op	    3906 B/op	      32 allocs/op
+BenchmarkEngineSearch_WithPopularity-32          	  170191	      6779 ns/op	    3906 B/op	      32 allocs/op
+BenchmarkEngineSearch_WithPopularity-32          	  176764	      6776 ns/op	    3904 B/op	      32 allocs/op
+BenchmarkEngineSearch_WithPopularity-32          	  178335	      6798 ns/op	    3906 B/op	      32 allocs/op
+BenchmarkEngineSearch_WithPopularity-32          	  177439	      6758 ns/op	    3905 B/op	      32 allocs/op
+BenchmarkEngineSearch_BM25Path-32                	  226670	      5353 ns/op	    3732 B/op	      31 allocs/op
+BenchmarkEngineSearch_BM25Path-32                	  234102	      5361 ns/op	    3731 B/op	      31 allocs/op
+BenchmarkEngineSearch_BM25Path-32                	  229530	      5327 ns/op	    3731 B/op	      31 allocs/op
+BenchmarkEngineSearch_BM25Path-32                	  231852	      5295 ns/op	    3733 B/op	      31 allocs/op
+BenchmarkEngineSearch_BM25Path-32                	  228488	      5359 ns/op	    3730 B/op	      31 allocs/op
+BenchmarkEngineSearch_BM25Path-32                	  222498	      5400 ns/op	    3731 B/op	      31 allocs/op
+BenchmarkEngineSearch_JaccardFallback-32         	  420354	      2773 ns/op	    1565 B/op	      15 allocs/op
+BenchmarkEngineSearch_JaccardFallback-32         	  448471	      2718 ns/op	    1564 B/op	      15 allocs/op
+BenchmarkEngineSearch_JaccardFallback-32         	  427825	      2768 ns/op	    1564 B/op	      15 allocs/op
+BenchmarkEngineSearch_JaccardFallback-32         	  429140	      2782 ns/op	    1564 B/op	      15 allocs/op
+BenchmarkEngineSearch_JaccardFallback-32         	  439868	      2765 ns/op	    1564 B/op	      15 allocs/op
+BenchmarkEngineSearch_JaccardFallback-32         	  417498	      2861 ns/op	    1564 B/op	      15 allocs/op
+BenchmarkEngineSearch_PrefixBoost-32             	  221533	      5580 ns/op	    5311 B/op	     105 allocs/op
+BenchmarkEngineSearch_PrefixBoost-32             	  214374	      5558 ns/op	    5310 B/op	     105 allocs/op
+BenchmarkEngineSearch_PrefixBoost-32             	  211959	      5633 ns/op	    5310 B/op	     105 allocs/op
+BenchmarkEngineSearch_PrefixBoost-32             	  206070	      5764 ns/op	    5311 B/op	     105 allocs/op
+BenchmarkEngineSearch_PrefixBoost-32             	  217190	      5493 ns/op	    5310 B/op	     105 allocs/op
+BenchmarkEngineSearch_PrefixBoost-32             	  217945	      5467 ns/op	    5309 B/op	     105 allocs/op
+BenchmarkHTTPSearch_ColdCache-32                 	   24212	     48141 ns/op	  129467 B/op	     352 allocs/op
+BenchmarkHTTPSearch_ColdCache-32                 	   24238	     47949 ns/op	  129455 B/op	     352 allocs/op
+BenchmarkHTTPSearch_ColdCache-32                 	   24336	     48309 ns/op	  129441 B/op	     352 allocs/op
+BenchmarkHTTPSearch_ColdCache-32                 	   24403	     47728 ns/op	  129448 B/op	     352 allocs/op
+BenchmarkHTTPSearch_ColdCache-32                 	   24058	     48572 ns/op	  129457 B/op	     352 allocs/op
+BenchmarkHTTPSearch_ColdCache-32                 	   24048	     48233 ns/op	  129460 B/op	     352 allocs/op
+BenchmarkHTTPSearch_WarmCache-32                 	  494074	      2390 ns/op	    9236 B/op	      24 allocs/op
+BenchmarkHTTPSearch_WarmCache-32                 	  499714	      2375 ns/op	    9236 B/op	      24 allocs/op
+BenchmarkHTTPSearch_WarmCache-32                 	  501242	      2362 ns/op	    9236 B/op	      24 allocs/op
+BenchmarkHTTPSearch_WarmCache-32                 	  498218	      2365 ns/op	    9236 B/op	      24 allocs/op
+BenchmarkHTTPSearch_WarmCache-32                 	  496960	      2365 ns/op	    9236 B/op	      24 allocs/op
+BenchmarkHTTPSearch_WarmCache-32                 	  497992	      2363 ns/op	    9236 B/op	      24 allocs/op
+BenchmarkHTTPSelect-32                           	   85300	     12083 ns/op	  105285 B/op	      31 allocs/op
+BenchmarkHTTPSelect-32                           	   83018	     12179 ns/op	  105289 B/op	      31 allocs/op
+BenchmarkHTTPSelect-32                           	   83830	     12258 ns/op	  105288 B/op	      31 allocs/op
+BenchmarkHTTPSelect-32                           	   85554	     11976 ns/op	  105285 B/op	      31 allocs/op
+BenchmarkHTTPSelect-32                           	   84386	     12223 ns/op	  105287 B/op	      31 allocs/op
+BenchmarkHTTPSelect-32                           	   83592	     12071 ns/op	  105288 B/op	      31 allocs/op
+PASS
+ok  	github.com/mbow/go-xsearch	181.672s
+PASS
+ok  	github.com/mbow/go-xsearch/bloom	0.003s
+goos: linux
+goarch: amd64
+pkg: github.com/mbow/go-xsearch/bm25
+cpu: AMD Ryzen 9 5950X 16-Core Processor            
+BenchmarkBM25Score-32                  	58499958	        19.09 ns/op	       0 B/op	       0 allocs/op
+BenchmarkBM25Score-32                  	63722100	        18.79 ns/op	       0 B/op	       0 allocs/op
+BenchmarkBM25Score-32                  	61362062	        18.94 ns/op	       0 B/op	       0 allocs/op
+BenchmarkBM25Score-32                  	63739297	        18.90 ns/op	       0 B/op	       0 allocs/op
+BenchmarkBM25Score-32                  	60768607	        18.94 ns/op	       0 B/op	       0 allocs/op
+BenchmarkBM25Score-32                  	59304939	        18.86 ns/op	       0 B/op	       0 allocs/op
+BenchmarkBM25Search-32                 	 4399846	       264.2 ns/op	     416 B/op	       7 allocs/op
+BenchmarkBM25Search-32                 	 4633033	       259.2 ns/op	     416 B/op	       7 allocs/op
+BenchmarkBM25Search-32                 	 4680927	       260.8 ns/op	     416 B/op	       7 allocs/op
+BenchmarkBM25Search-32                 	 4444638	       261.6 ns/op	     416 B/op	       7 allocs/op
+BenchmarkBM25Search-32                 	 4631018	       258.7 ns/op	     416 B/op	       7 allocs/op
+BenchmarkBM25Search-32                 	 4597465	       261.0 ns/op	     416 B/op	       7 allocs/op
+BenchmarkBM25Search_PrefixBoost-32     	 2335856	       514.8 ns/op	     632 B/op	      13 allocs/op
+BenchmarkBM25Search_PrefixBoost-32     	 2287482	       517.7 ns/op	     632 B/op	      13 allocs/op
+BenchmarkBM25Search_PrefixBoost-32     	 2332938	       515.3 ns/op	     632 B/op	      13 allocs/op
+BenchmarkBM25Search_PrefixBoost-32     	 2361492	       509.8 ns/op	     632 B/op	      13 allocs/op
+BenchmarkBM25Search_PrefixBoost-32     	 2329380	       518.6 ns/op	     632 B/op	      13 allocs/op
+BenchmarkBM25Search_PrefixBoost-32     	 2328847	       514.3 ns/op	     632 B/op	      13 allocs/op
+BenchmarkBM25FromSnapshot-32           	  642864	      1830 ns/op	    3712 B/op	      23 allocs/op
+BenchmarkBM25FromSnapshot-32           	  667540	      1847 ns/op	    3712 B/op	      23 allocs/op
+BenchmarkBM25FromSnapshot-32           	  618961	      1832 ns/op	    3712 B/op	      23 allocs/op
+BenchmarkBM25FromSnapshot-32           	  686362	      1858 ns/op	    3712 B/op	      23 allocs/op
+BenchmarkBM25FromSnapshot-32           	  645553	      1857 ns/op	    3712 B/op	      23 allocs/op
+BenchmarkBM25FromSnapshot-32           	  653056	      1841 ns/op	    3712 B/op	      23 allocs/op
+BenchmarkBM25Search_CommonPrefix-32    	    4002	    253517 ns/op	  129351 B/op	      41 allocs/op
+BenchmarkBM25Search_CommonPrefix-32    	    4617	    255105 ns/op	  129349 B/op	      41 allocs/op
+BenchmarkBM25Search_CommonPrefix-32    	    4548	    263279 ns/op	  129342 B/op	      41 allocs/op
+BenchmarkBM25Search_CommonPrefix-32    	    4294	    267906 ns/op	  129367 B/op	      41 allocs/op
+BenchmarkBM25Search_CommonPrefix-32    	    4124	    270426 ns/op	  129356 B/op	      41 allocs/op
+BenchmarkBM25Search_CommonPrefix-32    	    4131	    271820 ns/op	  129351 B/op	      41 allocs/op
+PASS
+ok  	github.com/mbow/go-xsearch/bm25	35.776s
+PASS
+ok  	github.com/mbow/go-xsearch/catalog	0.264s
+?   	github.com/mbow/go-xsearch/cmd/generate	[no test files]
+?   	github.com/mbow/go-xsearch/cmd/generate_products	[no test files]
+PASS
+ok  	github.com/mbow/go-xsearch/engine	0.011s
+PASS
+ok  	github.com/mbow/go-xsearch/index	0.004s
+PASS
+ok  	github.com/mbow/go-xsearch/ranking	0.003s
