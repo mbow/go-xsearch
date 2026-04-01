@@ -9,9 +9,18 @@
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body { font-family: system-ui, sans-serif; max-width: 600px; margin: 40px auto; padding: 0 20px; }
         h1 { margin-bottom: 20px; }
+        .search-container { position: relative; }
+        .ghost-text {
+            position: absolute; top: 0; left: 0;
+            padding: 12px; font-size: 16px; color: #ccc;
+            pointer-events: none; white-space: pre;
+            font-family: system-ui, sans-serif;
+            border: 2px solid transparent;
+        }
         input[type="search"] {
             width: 100%; padding: 12px; font-size: 16px;
             border: 2px solid #ccc; border-radius: 8px;
+            background: transparent; position: relative;
         }
         input[type="search"]:focus { outline: none; border-color: #4a90d9; }
         #results { margin-top: 8px; }
@@ -29,8 +38,10 @@
 </head>
 <body>
     <h1>Product Search</h1>
-    <div>
+    <div class="search-container">
+        <span id="ghost" class="ghost-text"></span>
         <input type="search"
+               id="search-input"
                name="q"
                placeholder="Search products..."
                autocomplete="off"
@@ -43,5 +54,16 @@
         <span id="spinner" class="htmx-indicator"> Searching...</span>
     </div>
     <div id="results"></div>
+    <script>
+    document.body.addEventListener('htmx:afterSwap', function(evt) {
+        if (evt.detail.target.id !== 'results') return;
+        var inner = document.getElementById('results-inner');
+        var ghost = document.getElementById('ghost');
+        var input = document.getElementById('search-input');
+        if (!inner || !ghost || !input) return;
+        var suffix = inner.getAttribute('data-ghost') || '';
+        ghost.textContent = input.value + suffix;
+    });
+    </script>
 </body>
 </html>

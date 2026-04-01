@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"path/filepath"
 	"strconv"
 	"sync"
@@ -37,6 +38,7 @@ type ResultsData struct {
 	Query           string
 	DirectResults   []engine.Result
 	FallbackResults []engine.Result
+	Ghost           string
 }
 
 // fragmentCache is a simple LRU cache for rendered HTML fragments.
@@ -117,6 +119,15 @@ func (app *App) handleSearch(w http.ResponseWriter, r *http.Request) {
 			data.DirectResults = append(data.DirectResults, res)
 		} else {
 			data.FallbackResults = append(data.FallbackResults, res)
+		}
+	}
+
+	if len(results) > 0 {
+		name := results[0].Product.Name
+		lowerName := strings.ToLower(name)
+		lowerQuery := strings.ToLower(query)
+		if strings.HasPrefix(lowerName, lowerQuery) {
+			data.Ghost = name[len(lowerQuery):]
 		}
 	}
 
