@@ -1,0 +1,11 @@
+# .github/dependabot.yml
+version: 2
+updates:
+  - package-ecosystem: "gomod"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default: 6
+      # Dependabot will wait 6 days after a version is published
+      # before opening a PR to update to it
