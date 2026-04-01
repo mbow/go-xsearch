@@ -329,7 +329,8 @@ type scorerFunc func(productID int, relevance float64) float64
 // query is the full lowercased query string used as a substring fallback.
 func computeHighlights(lowerName string, queryWords []string, query string) []Highlight {
 	// Try to find each query word in the product name.
-	var highlights []Highlight
+	var buf [4]Highlight
+	highlights := buf[:0]
 	for _, word := range queryWords {
 		pos := strings.Index(lowerName, word)
 		if pos >= 0 {
@@ -357,7 +358,9 @@ func mergeHighlights(hs []Highlight) []Highlight {
 	if len(hs) <= 1 {
 		return hs
 	}
-	merged := []Highlight{hs[0]}
+	var mbuf [4]Highlight
+	mbuf[0] = hs[0]
+	merged := mbuf[:1]
 	for _, h := range hs[1:] {
 		last := &merged[len(merged)-1]
 		if h.Start <= last.End {
