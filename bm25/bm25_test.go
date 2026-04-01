@@ -222,3 +222,25 @@ func BenchmarkBM25FromSnapshot(b *testing.B) {
 		_, _ = FromSnapshot(snap)
 	}
 }
+
+func TestNewIndex_PrefixCap(t *testing.T) {
+	products := []catalog.Product{
+		{Name: "Weihenstephaner Hefeweissbier", Category: "beer"},
+	}
+	idx := NewIndex(products)
+
+	// "weihen" (6 chars) should exist as a prefix
+	if _, ok := idx.wordPrefixes[0]["weihen"]; !ok {
+		t.Error("expected 'weihen' (6 chars) in word prefixes")
+	}
+
+	// "weihenst" (8 chars) should NOT exist — capped at 6
+	if _, ok := idx.wordPrefixes[0]["weihenst"]; ok {
+		t.Error("did NOT expect 'weihenst' (8 chars) — prefix should be capped at 6")
+	}
+
+	// Prefix posting should also be capped
+	if _, ok := idx.prefixPosting["weihenst"]; ok {
+		t.Error("did NOT expect 'weihenst' in prefix posting — capped at 6")
+	}
+}

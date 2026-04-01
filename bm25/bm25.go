@@ -122,7 +122,8 @@ func NewIndex(products []catalog.Product) *Index {
 		prefixes := make(map[string]struct{})
 		for _, word := range nameTokens {
 			runes := []rune(word)
-			for length := 1; length <= len(runes); length++ {
+			maxPfx := min(len(runes), 6)
+			for length := 1; length <= maxPfx; length++ {
 				prefixes[string(runes[:length])] = struct{}{}
 			}
 		}
