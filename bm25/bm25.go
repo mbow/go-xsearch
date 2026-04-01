@@ -75,19 +75,12 @@ type Index struct {
 // Tokenize splits s on whitespace, lowercases each token, and filters out
 // pure-punctuation tokens (keeps tokens with at least one alphanumeric char).
 func Tokenize(s string) []string {
-	fields := strings.Fields(s)
-	if len(fields) == 0 {
-		return nil
-	}
-	tokens := make([]string, 0, len(fields))
-	for _, f := range fields {
-		lower := strings.ToLower(f)
+	var tokens []string
+	for field := range strings.FieldsSeq(s) {
+		lower := strings.ToLower(field)
 		if hasAlphanumeric(lower) {
 			tokens = append(tokens, lower)
 		}
-	}
-	if len(tokens) == 0 {
-		return nil
 	}
 	return tokens
 }
