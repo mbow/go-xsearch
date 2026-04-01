@@ -68,17 +68,17 @@ func TestNewIndex(t *testing.T) {
 	}
 
 	// wordPrefixes[0] contains "bud" (Budweiser)
-	if _, ok := idx.wordPrefixes[0]["bud"]; !ok {
+	if _, found := slices.BinarySearch(idx.wordPrefixes[0], "bud"); !found {
 		t.Error("expected wordPrefixes[0] to contain 'bud' (from Budweiser)")
 	}
 
 	// wordPrefixes[2] contains "bud" because "bud" is a prefix of "buddha"
-	if _, ok := idx.wordPrefixes[2]["bud"]; !ok {
+	if _, found := slices.BinarySearch(idx.wordPrefixes[2], "bud"); !found {
 		t.Error("expected wordPrefixes[2] to contain 'bud' (prefix of 'buddha')")
 	}
 
 	// wordPrefixes[2] does NOT contain "budweiser" (no name word starts with "budweiser")
-	if _, ok := idx.wordPrefixes[2]["budweiser"]; ok {
+	if _, found := slices.BinarySearch(idx.wordPrefixes[2], "budweiser"); found {
 		t.Error("expected wordPrefixes[2] NOT to contain 'budweiser'")
 	}
 }
@@ -242,12 +242,12 @@ func TestNewIndex_PrefixCap(t *testing.T) {
 	idx := NewIndex(products)
 
 	// "weihen" (6 chars) should exist as a prefix
-	if _, ok := idx.wordPrefixes[0]["weihen"]; !ok {
+	if _, found := slices.BinarySearch(idx.wordPrefixes[0], "weihen"); !found {
 		t.Error("expected 'weihen' (6 chars) in word prefixes")
 	}
 
 	// "weihenst" (8 chars) should NOT exist — capped at 6
-	if _, ok := idx.wordPrefixes[0]["weihenst"]; ok {
+	if _, found := slices.BinarySearch(idx.wordPrefixes[0], "weihenst"); found {
 		t.Error("did NOT expect 'weihenst' (8 chars) — prefix should be capped at 6")
 	}
 

@@ -7,6 +7,7 @@
 package bm25
 
 import (
+	"cmp"
 	"fmt"
 	"math"
 	"slices"
@@ -57,13 +58,19 @@ func siftDown(h []SearchResult, root, n int) {
 	}
 }
 
+// TermFreq pairs a term with its frequency count in a document.
+type TermFreq struct {
+	Term  string `cbor:"t"`
+	Count int    `cbor:"c"`
+}
+
 // Index holds the precomputed BM25 data structures for a product catalog.
 type Index struct {
 	idf            map[string]float64
-	termFreqs      []map[string]int
+	termFreqs      [][]TermFreq
 	docLens        []int
 	avgDocLen      float64
-	wordPrefixes   []map[string]struct{}   // product ID → set of word prefixes
+	wordPrefixes   [][]string              // product ID → sorted word prefixes
 	prefixPosting  map[string][]int        // prefix → product IDs (inverted index for fast prefix lookup)
 	posting        map[string][]int
 	seenPool       sync.Pool
@@ -104,9 +111,9 @@ func NewIndex(products []catalog.Product) *Index {
 	n := len(products)
 	idx := &Index{
 		idf:           make(map[string]float64),
-		termFreqs:     make([]map[string]int, n),
+		termFreqs:     make([][]TermFreq, n),
 		docLens:       make([]int, n),
-		wordPrefixes:  make([]map[string]struct{}, n),
+		wordPrefixes:  make([][]string, n),
 		prefixPosting: make(map[string][]int),
 		posting:       make(map[string][]int),
 		k1:            DefaultK1,
@@ -126,34 +133,44 @@ func NewIndex(products []catalog.Product) *Index {
 		tokens := Tokenize(doc)
 
 		// Term frequencies for this document.
-		tf := make(map[string]int, len(tokens))
+		tfMap := make(map[string]int, len(tokens))
 		for _, tok := range tokens {
-			tf[tok]++
+			tfMap[tok]++
 		}
-		idx.termFreqs[i] = tf
+		tfs := make([]TermFreq, 0, len(tfMap))
+		for term, count := range tfMap {
+			tfs = append(tfs, TermFreq{Term: term, Count: count})
+		}
+		slices.SortFunc(tfs, func(a, b TermFreq) int { return cmp.Compare(a.Term, b.Term) })
+		idx.termFreqs[i] = tfs
 		idx.docLens[i] = len(tokens)
 		totalLen += len(tokens)
 
 		// Posting lists and document frequency.
-		for term := range tf {
+		for term := range tfMap {
 			idx.posting[term] = append(idx.posting[term], i)
 			df[term]++
 		}
 
 		// Word prefixes from product NAME only.
 		nameTokens := Tokenize(p.Name)
-		prefixes := make(map[string]struct{})
+		prefixMap := make(map[string]struct{})
 		for _, word := range nameTokens {
 			runes := []rune(word)
 			maxPfx := min(len(runes), 6)
 			for length := 1; length <= maxPfx; length++ {
-				prefixes[string(runes[:length])] = struct{}{}
+				prefixMap[string(runes[:length])] = struct{}{}
 			}
 		}
-		idx.wordPrefixes[i] = prefixes
+		pfxSlice := make([]string, 0, len(prefixMap))
+		for p := range prefixMap {
+			pfxSlice = append(pfxSlice, p)
+		}
+		slices.Sort(pfxSlice)
+		idx.wordPrefixes[i] = pfxSlice
 
 		// Build prefix inverted index for O(1) prefix lookup at query time.
-		for pfx := range prefixes {
+		for _, pfx := range pfxSlice {
 			idx.prefixPosting[pfx] = append(idx.prefixPosting[pfx], i)
 		}
 	}
@@ -180,7 +197,7 @@ func (idx *Index) Score(productID int, queryTerms []string) float64 {
 	if productID < 0 || productID >= len(idx.termFreqs) {
 		return 0
 	}
-	tf := idx.termFreqs[productID]
+	tfs := idx.termFreqs[productID]
 	dl := float64(idx.docLens[productID])
 	var score float64
 	for _, term := range queryTerms {
@@ -188,7 +205,12 @@ func (idx *Index) Score(productID int, queryTerms []string) float64 {
 		if !ok {
 			continue
 		}
-		f := float64(tf[term])
+		f := 0.0
+		if j, found := slices.BinarySearchFunc(tfs, term, func(tf TermFreq, target string) int {
+			return cmp.Compare(tf.Term, target)
+		}); found {
+			f = float64(tfs[j].Count)
+		}
 		if f == 0 {
 			continue
 		}
@@ -206,7 +228,7 @@ func (idx *Index) HasPrefixMatch(productID int, queryTerms []string) bool {
 	}
 	prefixes := idx.wordPrefixes[productID]
 	for _, term := range queryTerms {
-		if _, ok := prefixes[term]; ok {
+		if _, found := slices.BinarySearch(prefixes, term); found {
 			return true
 		}
 	}
@@ -318,7 +340,7 @@ func (idx *Index) Search(query string) []SearchResult {
 // Snapshot is a serializable representation of an Index, suitable for CBOR encoding.
 type Snapshot struct {
 	IDF           map[string]float64 `cbor:"idf"`
-	TermFreqs     []map[string]int   `cbor:"term_freqs"`
+	TermFreqs     [][]TermFreq       `cbor:"term_freqs"`
 	DocLens       []int              `cbor:"doc_lens"`
 	AvgDocLen     float64            `cbor:"avg_doc_len"`
 	WordPrefixes  [][]string         `cbor:"word_prefixes"`
@@ -329,23 +351,13 @@ type Snapshot struct {
 }
 
 // ToSnapshot converts the Index into a Snapshot for serialization.
-// Word prefix sets are converted to sorted string slices.
 func (idx *Index) ToSnapshot() Snapshot {
-	wp := make([][]string, len(idx.wordPrefixes))
-	for i, m := range idx.wordPrefixes {
-		s := make([]string, 0, len(m))
-		for k := range m {
-			s = append(s, k)
-		}
-		slices.Sort(s)
-		wp[i] = s
-	}
 	return Snapshot{
 		IDF:           idx.idf,
 		TermFreqs:     idx.termFreqs,
 		DocLens:       idx.docLens,
 		AvgDocLen:     idx.avgDocLen,
-		WordPrefixes:  wp,
+		WordPrefixes:  idx.wordPrefixes,
 		PrefixPosting: idx.prefixPosting,
 		Posting:       idx.posting,
 		K1:            idx.k1,
@@ -363,20 +375,12 @@ func FromSnapshot(s Snapshot) (*Index, error) {
 			n, len(s.DocLens), len(s.WordPrefixes))
 	}
 
-	wp := make([]map[string]struct{}, n)
-	for i, list := range s.WordPrefixes {
-		m := make(map[string]struct{}, len(list))
-		for _, k := range list {
-			m[k] = struct{}{}
-		}
-		wp[i] = m
-	}
 	idx := &Index{
 		idf:           s.IDF,
 		termFreqs:     s.TermFreqs,
 		docLens:       s.DocLens,
 		avgDocLen:     s.AvgDocLen,
-		wordPrefixes:  wp,
+		wordPrefixes:  s.WordPrefixes,
 		prefixPosting: s.PrefixPosting,
 		posting:       s.Posting,
 		k1:            s.K1,
