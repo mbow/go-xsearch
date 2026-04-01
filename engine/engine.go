@@ -48,6 +48,7 @@ type Result struct {
 // Engine orchestrates search across all components.
 type Engine struct {
 	products      []catalog.Product
+	lowerNames    []string // pre-lowered product names
 	bloom         *bloom.Filter
 	index         *index.Index
 	ranker        *ranking.Ranker
@@ -79,6 +80,11 @@ func New(products []catalog.Product) *Engine {
 		index:    index.NewIndex(products),
 		ranker:   ranking.New(lambda, alpha),
 		bm25idx:  bm25.NewIndex(products),
+	}
+
+	e.lowerNames = make([]string, len(products))
+	for i, p := range products {
+		e.lowerNames[i] = strings.ToLower(p.Name)
 	}
 
 	// Populate Bloom filter with all product, category, and tag trigrams
@@ -132,6 +138,11 @@ func NewFromEmbedded(products []catalog.Product, bloomRaw, indexRaw, bm25Raw []b
 		index:    index.FromSnapshot(is, products),
 		ranker:   ranking.New(lambda, alpha),
 		bm25idx:  bm25Idx,
+	}
+
+	e.lowerNames = make([]string, len(products))
+	for i, p := range products {
+		e.lowerNames[i] = strings.ToLower(p.Name)
 	}
 
 	e.buildPrefixCache()
@@ -240,7 +251,7 @@ func (e *Engine) searchInternal(query string) []Result {
 	trigrams := index.ExtractTrigrams(query)
 	if len(trigrams) == 0 {
 		results := e.buildResults(e.index.Search(query), MatchDirect, getScorer())
-		addHighlights(results, query)
+		e.addHighlights(results, query)
 		return results
 	}
 
@@ -285,7 +296,7 @@ func (e *Engine) searchInternal(query string) []Result {
 	}
 
 	// Compute highlights only for final top-K results.
-	addHighlights(results, query)
+	e.addHighlights(results, query)
 
 	return results
 }
@@ -316,9 +327,7 @@ type scorerFunc func(productID int, relevance float64) float64
 // computeHighlights finds byte positions of query matches in the product name.
 // queryWords should be pre-split and lowercased to avoid repeated allocation.
 // query is the full lowercased query string used as a substring fallback.
-func computeHighlights(name string, queryWords []string, query string) []Highlight {
-	lowerName := strings.ToLower(name)
-
+func computeHighlights(lowerName string, queryWords []string, query string) []Highlight {
 	// Try to find each query word in the product name.
 	var highlights []Highlight
 	for _, word := range queryWords {
@@ -428,7 +437,7 @@ func (e *Engine) buildBM25Results(bm25Results []bm25.SearchResult, score scorerF
 	// Compute highlights only for the final top-K results to minimize allocations.
 	queryWords := strings.Fields(query)
 	for i := range results {
-		hl := computeHighlights(results[i].Product.Name, queryWords, query)
+		hl := computeHighlights(e.lowerNames[results[i].ProductID], queryWords, query)
 		results[i].Highlights = hl
 		results[i].HighlightedName = buildHighlightedName(results[i].Product.Name, hl)
 	}
@@ -457,13 +466,13 @@ func (e *Engine) buildResults(searchResults []index.SearchResult, matchType Matc
 
 // addHighlights computes match highlighting for a slice of results.
 // Call this only on the final top-K results to minimize allocations.
-func addHighlights(results []Result, query string) {
+func (e *Engine) addHighlights(results []Result, query string) {
 	if len(results) == 0 {
 		return
 	}
 	queryWords := strings.Fields(query)
 	for i := range results {
-		hl := computeHighlights(results[i].Product.Name, queryWords, query)
+		hl := computeHighlights(e.lowerNames[results[i].ProductID], queryWords, query)
 		results[i].Highlights = hl
 		results[i].HighlightedName = buildHighlightedName(results[i].Product.Name, hl)
 	}
@@ -553,7 +562,7 @@ func (e *Engine) buildCategoryResults(category string, score scorerFunc) []Resul
 		}
 		s := score(id, fallbackRelevance)
 		name := e.products[id].Name
-		hl := computeHighlights(name, catWords, category)
+		hl := computeHighlights(e.lowerNames[id], catWords, category)
 		scored = append(scored, Result{
 			Product:         e.products[id],
 			ProductID:       id,
