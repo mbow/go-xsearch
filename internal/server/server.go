@@ -28,15 +28,18 @@ type App struct {
 	indexTmpl   *template.Template
 	resultTmpl  *template.Template
 	Cache       *FragmentCache
+	bufPool     sync.Pool
 }
 
 // New creates an App with the given engine and cache size.
 func New(eng *engine.Engine, cacheSize int) *App {
-	return &App{
+	app := &App{
 		Engine:      eng,
 		TemplateDir: "templates",
 		Cache:       NewFragmentCache(cacheSize),
 	}
+	app.bufPool = sync.Pool{New: func() any { return new(bytes.Buffer) }}
+	return app
 }
 
 // LoadTemplates parses the HTML templates from the TemplateDir directory.
@@ -110,8 +113,11 @@ func (app *App) HandleSearch(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	var buf bytes.Buffer
-	if err := app.resultTmpl.Execute(&buf, data); err != nil {
+	buf := app.bufPool.Get().(*bytes.Buffer)
+	buf.Reset()
+	defer app.bufPool.Put(buf)
+
+	if err := app.resultTmpl.Execute(buf, data); err != nil {
 		log.Printf("error rendering results template: %v", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
