@@ -328,25 +328,25 @@ func (e *Engine) Ranker() *ranking.Ranker {
 type scorerFunc func(productID int, relevance float64) float64
 
 // computeHighlights finds byte positions of query matches in the product name.
-func computeHighlights(name, query string) []Highlight {
+// queryWords should be pre-split and lowercased to avoid repeated allocation.
+// query is the full lowercased query string used as a substring fallback.
+func computeHighlights(name string, queryWords []string, query string) []Highlight {
 	lowerName := strings.ToLower(name)
-	lowerQuery := strings.ToLower(query)
 
 	// Try to find each query word in the product name.
-	words := strings.Fields(lowerQuery)
 	var highlights []Highlight
-	for _, word := range words {
-		idx := strings.Index(lowerName, word)
-		if idx >= 0 {
-			highlights = append(highlights, Highlight{Start: idx, End: idx + len(word)})
+	for _, word := range queryWords {
+		pos := strings.Index(lowerName, word)
+		if pos >= 0 {
+			highlights = append(highlights, Highlight{Start: pos, End: pos + len(word)})
 		}
 	}
 
 	// If no word matches, try the full query as a substring.
 	if len(highlights) == 0 {
-		idx := strings.Index(lowerName, lowerQuery)
-		if idx >= 0 {
-			highlights = append(highlights, Highlight{Start: idx, End: idx + len(lowerQuery)})
+		pos := strings.Index(lowerName, query)
+		if pos >= 0 {
+			highlights = append(highlights, Highlight{Start: pos, End: pos + len(query)})
 		}
 	}
 
@@ -381,6 +381,7 @@ func buildHighlightedName(name string, highlights []Highlight) string {
 	}
 
 	var b strings.Builder
+	b.Grow(len(name) + len(highlights)*13) // 13 = len("<mark>") + len("</mark>")
 	prev := 0
 	for _, h := range highlights {
 		if h.Start > prev {
@@ -410,6 +411,9 @@ func (e *Engine) buildBM25Results(bm25Results []bm25.SearchResult, score scorerF
 		maxBM25 = 1.0
 	}
 
+	// Pre-split query words once to avoid per-result strings.Fields allocation.
+	queryWords := strings.Fields(query)
+
 	results := make([]Result, 0, min(len(bm25Results), maxResults))
 	for _, r := range bm25Results {
 		if r.ProductID < 0 || r.ProductID >= len(e.products) {
@@ -425,7 +429,7 @@ func (e *Engine) buildBM25Results(bm25Results []bm25.SearchResult, score scorerF
 		popScore := score(r.ProductID, 0)
 		combined := bm25Alpha*normalizedBM25 + bm25PrefixAlpha*prefixBoost + bm25PopAlpha*popScore
 
-		hl := computeHighlights(e.products[r.ProductID].Name, query)
+		hl := computeHighlights(e.products[r.ProductID].Name, queryWords, query)
 		results = append(results, Result{
 			Product:         e.products[r.ProductID],
 			ProductID:       r.ProductID,
@@ -450,13 +454,16 @@ func (e *Engine) buildBM25Results(bm25Results []bm25.SearchResult, score scorerF
 
 // buildResults converts index search results to engine results with combined scores.
 func (e *Engine) buildResults(searchResults []index.SearchResult, matchType MatchType, score scorerFunc, query string) []Result {
+	// Pre-split query words once to avoid per-result strings.Fields allocation.
+	queryWords := strings.Fields(query)
+
 	results := make([]Result, 0, len(searchResults))
 	for _, sr := range searchResults {
 		if sr.ProductID < 0 || sr.ProductID >= len(e.products) {
 			continue
 		}
 		s := score(sr.ProductID, sr.Score)
-		hl := computeHighlights(e.products[sr.ProductID].Name, query)
+		hl := computeHighlights(e.products[sr.ProductID].Name, queryWords, query)
 		results = append(results, Result{
 			Product:         e.products[sr.ProductID],
 			ProductID:       sr.ProductID,
