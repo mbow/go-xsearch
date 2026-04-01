@@ -48,52 +48,74 @@ top. Stale popularity fades over time.
 User types "bud"
     |
     v
-[Bloom Filter] -- "do any products contain these trigrams?" -- YES
+[BM25 Index] -- word-level match? "bud" is a prefix of "budweiser" -- YES
     |
     v
-[N-gram Index] -- break "bud" into trigrams, find matching products
+[BM25 + Prefix Boost] -- score by term importance, boost prefix matches
     |
     v
-[Jaccard Scoring] -- rank by trigram overlap (fuzzy matching)
+[Popularity Ranking] -- blend with click history (exponential decay)
     |
     v
-[Popularity Ranking] -- boost items users click on most
+[Highlight + Ghost Text] -- "<mark>Bud</mark>weiser", ghost: "weiser"
     |
     v
-[HTML Fragment] -- server renders just the results list
-    |
-    v
-[HTMX] -- swaps the results into the page, no JavaScript framework needed
+[HTMX] -- swaps results into the page, ghost text overlays the input
 ```
 
-If the Bloom filter says "definitely no matches," the search returns empty in
-**nanoseconds** without touching the index. This is how the system stays fast
-even at scale.
+If the BM25 index finds no word-level matches (typo like "budwiser"), the system
+falls back to **trigram Jaccard scoring** — breaking the query into overlapping
+3-character substrings and ranking by overlap. A **Bloom filter** fast-rejects
+queries that definitely won't match anything.
 
 ## Performance
 
-Benchmarked on an AMD Ryzen 9 5950X with 10,000 beers.
+Benchmarked on an AMD Ryzen 9 5950X with 10,000 products. All search data
+structures are precomputed and embedded in the binary — zero I/O at startup.
 
 | Query Type                    | Example             |       Time | Allocations |
 | ----------------------------- | ------------------- | ---------: | ----------: |
-| Cached prefix (1-2 chars)     | `"b"`               |  **12 ns** |           0 |
-| Category match                | `"beer"`            |  **15 ns** |           0 |
-| Short query fix               | `"bud"`             | **9.4 us** |          10 |
-| Prefix (3+ chars)             | `"nik"`             | **0.8 us** |           5 |
-| Bloom rejection (gibberish)   | `"xzqwvp"`          | **1.3 us** |           5 |
-| Fuzzy / typo                  | `"budwiser"`        | **2.9 us** |          19 |
-| Full pipeline with popularity | `"budweiser"`       | **5.2 us** |          21 |
-| HTTP response (warm cache)    | `GET /search?q=bud` | **2.3 us** |          24 |
-| HTTP response (cold cache)    | `GET /search?q=bud` |  **46 us** |         312 |
+| Cached prefix (1-2 chars)     | `"b"`               |  **13 ns** |           0 |
+| Category match                | `"beer"`            |  **19 ns** |           0 |
+| Prefix (3+ chars, BM25)       | `"nik"`             | **840 ns** |           4 |
+| Bloom rejection (gibberish)   | `"xzqwvp"`          | **1.3 µs** |           4 |
+| Prefix boost                  | `"bud"`             | **2.6 µs** |          25 |
+| Fuzzy / typo (Jaccard)        | `"budwiser"`        | **2.8 µs** |          17 |
+| Full pipeline with popularity | `"budweiser"`       | **3.8 µs** |          18 |
+| HTTP response (warm cache)    | `GET /search?q=bud` | **2.3 µs** |          24 |
+| HTTP response (cold cache)    | `GET /search?q=bud` |  **40 µs** |         264 |
 
-> 1 us (microsecond) = 0.001 milliseconds. Most queries complete in **under 6
-> microseconds**.
+> 1 µs (microsecond) = 0.001 milliseconds. Most queries complete in **under 4
+> microseconds**. The full HTTP round-trip including template rendering is under
+> 40 µs on a cache miss.
+
+### Search Pipeline
+
+Queries flow through a hybrid pipeline: **BM25 word-level matching** (primary)
+with **Jaccard trigram fallback** (for typos). Results include match highlighting
+(`<mark>` tags), ghost text completion, and keyboard navigation.
+
+```
+Query → BM25 word match? → YES → score + prefix boost + popularity → top 10
+                         → NO  → trigram Jaccard (typo tolerant) → top 10
+                                → category fallback if < 3 results
+```
+
+### Key Optimisations
+
+- **Typed min-heap** for top-K selection — no `container/heap` interface boxing
+- **Pooled bitsets** for candidate dedup — zero-alloc on the hot path
+- **Pre-lowered product names** — avoids per-result `strings.ToLower`
+- **Sorted slices** replace per-product maps — eliminates 20K map allocations at startup
+- **Stack-allocated highlight buffers** — avoids heap escape for ≤ 4 highlights
+- **Binary search prefix fallback** — O(log n) for short queries vs O(n) linear scan
+- **Parallel prefix cache build** — startup scales with CPU cores
 
 ### Startup
 
-The product catalog, Bloom filter, and n-gram index are all **pre-built at
-compile time** and embedded in the binary as gzip-compressed CBOR. There is zero
-file I/O at startup — the binary is ready to serve immediately.
+The product catalog, Bloom filter, n-gram index, and BM25 index are all
+**pre-built at compile time** and embedded in the binary as gzip-compressed CBOR.
+There is zero file I/O at startup — the binary is ready to serve immediately.
 
 ## Tech Stack
 
@@ -127,18 +149,20 @@ open http://localhost:8080
 
 ```
 search/
-  main.go                 # HTTP server, routes, template rendering
-  bloom/bloom.go          # Bloom filter (probabilistic fast rejection)
-  index/ngram.go          # N-gram inverted index (trigram search + Jaccard scoring)
-  ranking/ranking.go      # Popularity ranking (exponential time decay)
-  engine/engine.go        # Search orchestrator (wires everything together)
-  catalog/                # Product data model + embedded CBOR loader
-  cmd/generate/           # Code-generation: JSON -> CBOR with pre-built index
-  cmd/generate_products/  # Sample data generator (10k beers)
-  templates/              # HTMX HTML templates
-  static/htmx.min.js     # Vendored HTMX
-  data/products.json      # Source product catalog
-  bench_test.go           # Performance benchmarks
+  main.go                      # Entry point (wiring + ListenAndServe)
+  internal/server/             # HTTP handlers, fragment cache, template rendering
+  engine/engine.go             # Search orchestrator + highlight computation
+  bm25/bm25.go                # BM25 scoring with prefix boost (typed min-heap)
+  bloom/bloom.go               # Bloom filter (probabilistic fast rejection)
+  index/ngram.go               # N-gram inverted index (trigram Jaccard + binary search)
+  ranking/ranking.go           # Popularity ranking (exponential time decay)
+  catalog/                     # Product data model + embedded CBOR loader
+  cmd/generate/                # Code-generation: JSON -> CBOR with pre-built indexes
+  cmd/generate_products/       # Sample data generator (10k beers)
+  benchmarks/suite_test.go     # Consolidated benchmark suite
+  templates/                   # HTMX HTML templates (highlights, ghost text, keyboard nav)
+  static/htmx.min.js          # Vendored HTMX
+  data/products.json           # Source product catalog
 ```
 
 ## Updating Product Data
@@ -156,7 +180,15 @@ file is embedded in the binary at compile time via `//go:embed`.
 
 ## Algorithms
 
-This project implements four search algorithms from scratch:
+This project implements five search algorithms from scratch:
+
+### BM25 with Prefix Boosting
+
+The primary ranking algorithm. Product names, categories, and tags are tokenized
+into words with precomputed IDF (inverse document frequency) values. Queries are
+scored using the Okapi BM25 formula. A **prefix bonus** (0.5 x max IDF) is added
+when a query term is a prefix of a product name word — this is why "bud" ranks
+Budweiser above Funky Buddha.
 
 ### Bloom Filter
 
@@ -164,38 +196,47 @@ A probabilistic data structure that answers "is this item definitely NOT in the
 set?" in constant time. Uses FNV-1a and DJB2 hash functions with double hashing.
 False positives are possible; false negatives are not.
 
-### N-gram Inverted Index
+### N-gram Inverted Index (Jaccard Fallback)
 
 Every product name and tag is broken into overlapping 3-character substrings
 (trigrams). An inverted index maps each trigram to the products that contain it.
-Queries are tokenized the same way, and candidates are scored by **Jaccard
-similarity** — the ratio of shared trigrams to total trigrams.
+When BM25 finds no word-level matches (typos like "budwiser"), the system falls
+back to scoring by **Jaccard similarity** — the ratio of shared trigrams to total
+trigrams. This provides typo tolerance without edit distance computation.
 
 ### Exponential Decay Ranking
 
 Each time a user clicks a product, the timestamp is recorded. Popularity is
 computed as `sum(e^(-0.05 * age_in_days))` — recent clicks count more, old
-clicks fade. This is combined with the search relevance score to produce the
-final ranking.
+clicks fade. This is blended with the search relevance score (70% BM25 + 30%
+popularity) to produce the final ranking.
 
 ### Category Fallback
 
 When a query doesn't match any product well enough, the system matches against
 category names instead and returns the most popular products from the
-best-matching category. This is how "budwiser" (not in catalog) can still show
-you other beers.
+best-matching category.
 
 ## Running Benchmarks
 
 ```bash
-# All benchmarks
-go test -bench=. -benchmem .
+# Quick run (all benchmarks)
+make bench
 
-# Specific benchmark
-go test -bench=BenchmarkEngineSearch_Fuzzy -benchmem .
+# Record results with commit tracking
+make bench-record
 
-# With CPU profiling
-go test -bench=BenchmarkEngineSearch_Fuzzy -cpuprofile=cpu.prof .
+# Save as comparison baseline
+make bench-save
+
+# Compare against saved baseline (refuses same-commit comparisons)
+make bench-compare
+
+# Compare against original pristine baseline (historical progress)
+make bench-compare-baseline
+
+# CPU profiling a specific benchmark
+go test -bench=BenchmarkComponent_EngineBM25Path -cpuprofile=cpu.prof ./benchmarks/
 go tool pprof cpu.prof
 ```
 
