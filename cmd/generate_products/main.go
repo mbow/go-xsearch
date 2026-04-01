@@ -8,7 +8,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"math/rand"
+	"math/rand/v2"
 	"os"
 )
 
@@ -185,16 +185,16 @@ var servings = []string{"bottle", "can", "draft"}
 var sizes = []string{"12oz", "16oz", "12oz", "16oz", "pint", "22oz", "330ml", "500ml"}
 
 func main() {
-	rng := rand.New(rand.NewSource(42)) // deterministic for reproducibility
+	rng := rand.New(rand.NewPCG(42, 0)) // deterministic for reproducibility
 
 	var products []Product
 
 	// Generate ~10,000 beers
 	seen := make(map[string]struct{})
 	for len(products) < 10000 {
-		brewery := breweries[rng.Intn(len(breweries))]
-		style := styles[rng.Intn(len(styles))]
-		modifier := nameModifiers[rng.Intn(len(nameModifiers))]
+		brewery := breweries[rng.IntN(len(breweries))]
+		style := styles[rng.IntN(len(styles))]
+		modifier := nameModifiers[rng.IntN(len(nameModifiers))]
 
 		var name string
 		if modifier == "" {
@@ -225,14 +225,14 @@ func main() {
 			abvCategory = "imperial"
 		}
 
-		serving := servings[rng.Intn(len(servings))]
-		size := sizes[rng.Intn(len(sizes))]
+		serving := servings[rng.IntN(len(servings))]
+		size := sizes[rng.IntN(len(sizes))]
 
 		tags := []string{style.Type, style.Color, style.Carbonation + " carbonation", abvStr, abvCategory, serving, size}
 		tags = append(tags, style.Flavors...)
 
 		// Maybe add an extra ingredient
-		extras := extraIngredients[rng.Intn(len(extraIngredients))]
+		extras := extraIngredients[rng.IntN(len(extraIngredients))]
 		if extras != nil {
 			tags = append(tags, extras...)
 		}

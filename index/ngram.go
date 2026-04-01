@@ -10,11 +10,11 @@ package index
 import (
 	"cmp"
 	"maps"
-	"github.com/mbow/go-xsearch/catalog"
 	"slices"
-	"sort"
 	"strings"
 	"sync"
+
+	"github.com/mbow/go-xsearch/catalog"
 )
 
 // ExtractTrigrams returns all overlapping 3-character substrings
@@ -265,13 +265,12 @@ func (idx *Index) Search(query string) []SearchResult {
 // prefixSearch uses binary search on the sorted name array to find products
 // whose lowercased name starts with the given short query.
 func (idx *Index) prefixSearch(query string) []SearchResult {
-	n := len(idx.sortedNames)
-	lo := sort.Search(n, func(i int) bool {
-		return idx.sortedNames[i].Name >= query
+	lo, _ := slices.BinarySearchFunc(idx.sortedNames, query, func(entry nameEntry, target string) int {
+		return cmp.Compare(entry.Name, target)
 	})
 
 	var results []SearchResult
-	for i := lo; i < n; i++ {
+	for i := lo; i < len(idx.sortedNames); i++ {
 		if !strings.HasPrefix(idx.sortedNames[i].Name, query) {
 			break
 		}
