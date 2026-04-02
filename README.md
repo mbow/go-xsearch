@@ -87,8 +87,9 @@ are precomputed and embedded in the binary — zero I/O at startup.
 | HTTP response (cold cache)    | `GET /search?q=bud` |  **38 µs** |    256 |   118K |
 | Parallel search (32 threads)  | mixed queries        | **170 ns** |      7 |   902 |
 
-> 1 µs = 0.001 ms. Most queries complete in **under 3 microseconds**. The
-> Bloom filter rejects gibberish in 524 ns with a single allocation.
+> A warm-cache HTTP response returns in **2.2 µs** (0.002 ms). A cold-cache
+> miss — including search, ranking, and HTML template rendering — completes in
+> **38 µs** (0.038 ms). For context, a single frame at 60 FPS is 16,667 µs.
 
 ### Search Pipeline
 
