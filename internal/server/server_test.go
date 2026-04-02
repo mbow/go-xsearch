@@ -44,6 +44,12 @@ func TestHandleIndex(t *testing.T) {
 	if !strings.Contains(body, "hx-get") {
 		t.Error("expected page to contain HTMX attributes")
 	}
+	if !strings.Contains(body, `hx-sync="this:replace"`) {
+		t.Error("expected search input to replace stale in-flight requests")
+	}
+	if !strings.Contains(body, `aria-live="polite"`) {
+		t.Error("expected results region to announce updates")
+	}
 }
 
 func TestHandleSearch(t *testing.T) {

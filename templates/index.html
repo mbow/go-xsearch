@@ -47,34 +47,120 @@
                name="q"
                placeholder="Search products..."
                autocomplete="off"
+               autocapitalize="off"
+               spellcheck="false"
+               enterkeyhint="search"
                hx-get="/search"
-               hx-trigger="keyup changed delay:80ms, search"
+               hx-trigger="input changed delay:60ms, search"
                hx-target="#results"
                hx-swap="innerHTML"
+               hx-sync="this:replace"
                hx-push-url="false"
                hx-indicator="#spinner">
         <span id="spinner" class="htmx-indicator"> Searching...</span>
     </div>
-    <div id="results"></div>
+    <div id="results" aria-live="polite" aria-busy="false"></div>
     <script>
     var activeIdx = -1;
+    var latestIssuedQuery = '';
+    var input = document.getElementById('search-input');
+    var ghost = document.getElementById('ghost');
+    var results = document.getElementById('results');
+
+    function setGhostSuffix(suffix) {
+        if (!input || !ghost) return;
+        if (!input.value) {
+            ghost.textContent = '';
+            return;
+        }
+        ghost.textContent = input.value + (suffix || '');
+    }
+
+    function resetSelection() {
+        activeIdx = -1;
+        updateActive(document.querySelectorAll('.result-item'));
+    }
+
+    function setBusy(isBusy) {
+        if (results) {
+            results.setAttribute('aria-busy', isBusy ? 'true' : 'false');
+        }
+    }
+
+    document.body.addEventListener('htmx:configRequest', function(evt) {
+        if (evt.detail.elt !== input) return;
+
+        var trigger = evt.detail.triggeringEvent;
+        if (trigger && trigger.isComposing) {
+            evt.preventDefault();
+            return;
+        }
+
+        var query = evt.detail.parameters.q.trim();
+        if (!query) {
+            latestIssuedQuery = '';
+            setBusy(false);
+            if (results) results.innerHTML = '';
+            if (ghost) ghost.textContent = '';
+            evt.preventDefault();
+            return;
+        }
+
+        latestIssuedQuery = evt.detail.parameters.q;
+        setBusy(true);
+    });
+
+    document.body.addEventListener('htmx:beforeSwap', function(evt) {
+        if (!evt.detail.target || evt.detail.target.id !== 'results') return;
+        var req = evt.detail.requestConfig;
+        if (!req || !req.parameters) return;
+        if ((req.parameters.q || '') !== latestIssuedQuery) {
+            evt.detail.shouldSwap = false;
+        }
+    });
 
     document.body.addEventListener('htmx:afterSwap', function(evt) {
         if (evt.detail.target.id !== 'results') return;
-        activeIdx = -1;
+        resetSelection();
+        setBusy(false);
         var inner = document.getElementById('results-inner');
-        var ghost = document.getElementById('ghost');
-        var input = document.getElementById('search-input');
-        if (!inner || !ghost || !input) return;
+        if (!inner) {
+            setGhostSuffix('');
+            return;
+        }
         var suffix = inner.getAttribute('data-ghost') || '';
-        ghost.textContent = input.value + suffix;
+        setGhostSuffix(suffix);
     });
 
-    document.getElementById('search-input').addEventListener('keydown', function(e) {
+    document.body.addEventListener('htmx:responseError', function(evt) {
+        if (evt.detail.elt !== input) return;
+        setBusy(false);
+    });
+
+    document.body.addEventListener('htmx:sendError', function(evt) {
+        if (evt.detail.elt !== input) return;
+        setBusy(false);
+    });
+
+    document.body.addEventListener('htmx:timeout', function(evt) {
+        if (evt.detail.elt !== input) return;
+        setBusy(false);
+    });
+
+    input.addEventListener('input', function() {
+        resetSelection();
+        setGhostSuffix('');
+        if (this.value.trim() !== '') return;
+        latestIssuedQuery = '';
+        setBusy(false);
+        if (results) results.innerHTML = '';
+        if (window.htmx) htmx.trigger(this, 'htmx:abort');
+    });
+
+    input.addEventListener('keydown', function(e) {
         var items = document.querySelectorAll('.result-item');
 
         if (e.key === 'Tab') {
-            var ghost = document.getElementById('ghost');
             if (ghost.textContent && ghost.textContent !== this.value) {
                 e.preventDefault();
                 this.value = ghost.textContent;
