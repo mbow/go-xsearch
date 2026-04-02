@@ -1,16 +1,27 @@
-  # go-xsearch
+# go-xsearch
 
-<div align="center">
+<p align="center">
   <img src="docs/logo.png" alt="go-xsearch" width="180" />
-</div>
+</p>
 
-<div align="center">
-  **Autocomplete search engine. Single binary. Zero infrastructure.**
-  [![CI](https://github.com/mbow/go-xsearch/actions/workflows/ci.yml/badge.svg)](https://github.com/mbow/go-xsearch/actions/workflows/ci.yml)
-  [![Go](https://img.shields.io/badge/Go-1.26-00ADD8?logo=go&logoColor=white)](https://go.dev)
-  [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-  [![Go Report Card](https://goreportcard.com/badge/github.com/mbow/go-xsearch)](https://goreportcard.com/report/github.com/mbow/go-xsearch)
-</div>
+<p align="center">
+  <strong>Autocomplete search engine. Single binary. Zero infrastructure.</strong>
+</p>
+
+<p align="center">
+  <a href="https://github.com/mbow/go-xsearch/actions/workflows/ci.yml">
+    <img alt="CI" src="https://github.com/mbow/go-xsearch/actions/workflows/ci.yml/badge.svg" />
+  </a>
+  <a href="https://go.dev">
+    <img alt="Go" src="https://img.shields.io/badge/Go-1.26-00ADD8?logo=go&logoColor=white" />
+  </a>
+  <a href="LICENSE">
+    <img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-yellow.svg" />
+  </a>
+  <a href="https://goreportcard.com/report/github.com/mbow/go-xsearch">
+    <img alt="Go Report Card" src="https://goreportcard.com/badge/github.com/mbow/go-xsearch" />
+  </a>
+</p>
 
 A cold-cache search — including BM25 scoring, typo correction, popularity
 ranking, and HTML rendering — completes in **6.7 microseconds**. A warm cache
