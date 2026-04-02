@@ -7,6 +7,7 @@ import (
 )
 
 func TestLoadProducts(t *testing.T) {
+	t.Parallel()
 	// Create a temp JSON file
 	dir := t.TempDir()
 	path := filepath.Join(dir, "products.json")
@@ -42,6 +43,7 @@ func TestLoadProducts(t *testing.T) {
 }
 
 func TestLoadProductsFileNotFound(t *testing.T) {
+	t.Parallel()
 	_, err := LoadProducts("/nonexistent/path.json")
 	if err == nil {
 		t.Fatal("expected error for nonexistent file, got nil")
@@ -49,6 +51,7 @@ func TestLoadProductsFileNotFound(t *testing.T) {
 }
 
 func TestLoadProductsInvalidJSON(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "bad.json")
 	if err := os.WriteFile(path, []byte("not json"), 0644); err != nil {

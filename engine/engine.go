@@ -12,7 +12,7 @@ import (
 	"github.com/mbow/go-xsearch/index"
 	"github.com/mbow/go-xsearch/ranking"
 	"html"
-	"maps"
+	"html/template"
 	"runtime"
 	"slices"
 	"strings"
@@ -42,7 +42,7 @@ type Result struct {
 	Score           float64
 	MatchType       MatchType
 	Highlights      []Highlight
-	HighlightedName string
+	HighlightedName template.HTML // security: only buildHighlightedName constructs this; all segments are html.EscapeString'd
 }
 
 // Engine orchestrates search across all components.
@@ -60,7 +60,8 @@ type Engine struct {
 }
 
 const (
-	bloomSize         = 20000
+	bloomMinSize      = 20000
+	bloomBitsPerItem  = 100 // ~100 bits per product for low false-positive rate
 	bloomHashCount    = 3
 	lambda            = 0.05
 	alpha             = 0.6
@@ -76,7 +77,7 @@ const (
 func New(products []catalog.Product) *Engine {
 	e := &Engine{
 		products: products,
-		bloom:    bloom.New(bloomSize, bloomHashCount),
+		bloom:    bloom.New(max(bloomMinSize, uint64(len(products))*bloomBitsPerItem), bloomHashCount),
 		index:    index.NewIndex(products),
 		ranker:   ranking.New(lambda, alpha),
 		bm25idx:  bm25.NewIndex(products),
@@ -182,16 +183,14 @@ func (e *Engine) buildPrefixCache() {
 
 	var wg sync.WaitGroup
 	for range workers {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for prefix := range ch {
 				results := e.searchInternal(prefix)
 				if len(results) > 0 {
 					resultCh <- entry{prefix: prefix, results: results}
 				}
 			}
-		}()
+		})
 	}
 
 	for _, p := range prefixes {
@@ -373,9 +372,9 @@ func mergeHighlights(hs []Highlight) []Highlight {
 }
 
 // buildHighlightedName renders product name with <mark> tags around matched portions.
-func buildHighlightedName(name string, highlights []Highlight) string {
+func buildHighlightedName(name string, highlights []Highlight) template.HTML {
 	if len(highlights) == 0 {
-		return html.EscapeString(name)
+		return template.HTML(html.EscapeString(name))
 	}
 
 	var b strings.Builder
@@ -393,7 +392,7 @@ func buildHighlightedName(name string, highlights []Highlight) string {
 	if prev < len(name) {
 		b.WriteString(html.EscapeString(name[prev:]))
 	}
-	return b.String()
+	return template.HTML(b.String())
 }
 
 // buildBM25Results converts BM25 search results to engine results,
@@ -603,5 +602,5 @@ func (e *Engine) rebuildCategoryCache() {
 
 // allCategories returns all unique category names.
 func (e *Engine) allCategories() []string {
-	return slices.Collect(maps.Keys(e.index.CategoryNames()))
+	return slices.Collect(e.index.CategoryNames())
 }

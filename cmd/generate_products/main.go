@@ -10,13 +10,9 @@ import (
 	"fmt"
 	"math/rand/v2"
 	"os"
-)
 
-type Product struct {
-	Name     string   `json:"name"`
-	Category string   `json:"category"`
-	Tags     []string `json:"tags,omitempty"`
-}
+	"github.com/mbow/go-xsearch/catalog"
+)
 
 // Style defines a beer style with its typical attributes.
 type Style struct {
@@ -187,7 +183,7 @@ var sizes = []string{"12oz", "16oz", "12oz", "16oz", "pint", "22oz", "330ml", "5
 func main() {
 	rng := rand.New(rand.NewPCG(42, 0)) // deterministic for reproducibility
 
-	var products []Product
+	var products []catalog.Product
 
 	// Generate ~10,000 beers
 	seen := make(map[string]struct{})
@@ -237,7 +233,7 @@ func main() {
 			tags = append(tags, extras...)
 		}
 
-		products = append(products, Product{
+		products = append(products, catalog.Product{
 			Name:     name,
 			Category: "beer",
 			Tags:     tags,
@@ -245,7 +241,7 @@ func main() {
 	}
 
 	// Add non-beer products (existing catalog items)
-	nonBeer := []Product{
+	nonBeer := []catalog.Product{
 		{Name: "Jack Daniel's Tennessee Whiskey", Category: "whiskey", Tags: []string{"bourbon", "smooth", "amber", "40%", "bottle", "750ml"}},
 		{Name: "Johnnie Walker Black Label", Category: "whiskey", Tags: []string{"scotch", "smoky", "dark", "40%", "bottle", "750ml"}},
 		{Name: "Jameson Irish Whiskey", Category: "whiskey", Tags: []string{"irish", "smooth", "light", "40%", "bottle", "750ml"}},

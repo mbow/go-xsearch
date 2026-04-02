@@ -318,3 +318,51 @@ func BenchmarkRanking_Scorer(b *testing.B) {
 		_ = score(0, 0.8)
 	}
 }
+
+// =====================================================================
+// 4. Parallel Contention Benchmarks
+// =====================================================================
+
+func BenchmarkParallel_EngineSearch(b *testing.B) {
+	e := benchEngine(b)
+	queries := []string{"bud", "budweiser", "nik", "beer", "xzqwvp"}
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		i := 0
+		for pb.Next() {
+			e.Search(queries[i%len(queries)])
+			i++
+		}
+	})
+}
+
+func BenchmarkParallel_HTTPSearch(b *testing.B) {
+	e := benchEngine(b)
+	app := server.New(e, 1024)
+	app.TemplateDir = "../templates"
+	app.LoadTemplates()
+
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			req := httptest.NewRequest("GET", "/search?q=bud", nil)
+			w := httptest.NewRecorder()
+			app.HandleSearch(w, req)
+		}
+	})
+}
+
+func BenchmarkParallel_SearchWithSelections(b *testing.B) {
+	e := benchEngine(b)
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		i := 0
+		for pb.Next() {
+			if i%10 == 0 {
+				e.RecordSelection(i % 100)
+			}
+			e.Search("budweiser")
+			i++
+		}
+	})
+}

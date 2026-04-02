@@ -75,6 +75,7 @@ type Index struct {
 	posting        map[string][]int
 	seenPool       sync.Pool
 	candidatesPool sync.Pool
+	heapPool       sync.Pool
 	k1             float64
 	b              float64
 }
@@ -187,6 +188,7 @@ func NewIndex(products []catalog.Product) *Index {
 
 	idx.seenPool = sync.Pool{New: func() any { s := make([]bool, n); return &s }}
 	idx.candidatesPool = sync.Pool{New: func() any { s := make([]int, 0, 64); return &s }}
+	idx.heapPool = sync.Pool{New: func() any { s := make([]SearchResult, 0, maxSearchResults); return &s }}
 
 	return idx
 }
@@ -283,7 +285,8 @@ func (idx *Index) Search(query string) []SearchResult {
 	}
 	prefixBonus := 0.5 * maxIDF
 
-	h := make([]SearchResult, 0, maxSearchResults)
+	heapPtr := idx.heapPool.Get().(*[]SearchResult)
+	h := (*heapPtr)[:0]
 	hLen := 0
 
 	for _, id := range candidates {
@@ -333,6 +336,9 @@ func (idx *Index) Search(query string) []SearchResult {
 			siftDown(h, 0, hLen)
 		}
 	}
+
+	*heapPtr = h
+	idx.heapPool.Put(heapPtr)
 
 	return results
 }
@@ -388,5 +394,6 @@ func FromSnapshot(s Snapshot) (*Index, error) {
 	}
 	idx.seenPool = sync.Pool{New: func() any { s := make([]bool, n); return &s }}
 	idx.candidatesPool = sync.Pool{New: func() any { s := make([]int, 0, 64); return &s }}
+	idx.heapPool = sync.Pool{New: func() any { s := make([]SearchResult, 0, maxSearchResults); return &s }}
 	return idx, nil
 }

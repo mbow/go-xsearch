@@ -6,11 +6,16 @@
 package main
 
 import (
+	"cmp"
+	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"syscall"
 	"time"
 
 	"github.com/mbow/go-xsearch/catalog"
@@ -64,12 +69,21 @@ func main() {
 
 	// Prune old data and start periodic snapshots
 	app.Engine.Ranker().Prune(90)
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
 	go func() {
 		ticker := time.NewTicker(snapshotPeriod)
 		defer ticker.Stop()
-		for range ticker.C {
-			if err := app.Engine.Ranker().Save(popPath); err != nil {
-				log.Printf("error saving popularity data: %v", err)
+		for {
+			select {
+			case <-ticker.C:
+				if err := app.Engine.Ranker().Save(popPath); err != nil {
+					log.Printf("error saving popularity data: %v", err)
+				}
+			case <-ctx.Done():
+				return
 			}
 		}
 	}()
@@ -77,9 +91,34 @@ func main() {
 	mux := http.NewServeMux()
 	app.Routes(mux)
 
-	addr := ":8080"
+	addr := cmp.Or(os.Getenv("LISTEN_ADDR"), "127.0.0.1:8080")
+	srv := &http.Server{
+		Addr:              addr,
+		Handler:           mux,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       10 * time.Second,
+		WriteTimeout:      15 * time.Second,
+		IdleTimeout:       60 * time.Second,
+	}
+
+	go func() {
+		<-ctx.Done()
+		log.Println("shutting down server...")
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := srv.Shutdown(shutdownCtx); err != nil {
+			log.Printf("server shutdown error: %v", err)
+		}
+	}()
+
 	log.Printf("starting server on %s", addr)
-	if err := http.ListenAndServe(addr, mux); err != nil {
+	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Fatal(err)
 	}
+
+	// Final save of popularity data before exit.
+	if err := app.Engine.Ranker().Save(popPath); err != nil {
+		log.Printf("error saving final popularity data: %v", err)
+	}
+	log.Println("server stopped")
 }

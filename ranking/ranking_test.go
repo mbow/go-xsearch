@@ -9,6 +9,7 @@ import (
 )
 
 func TestRecordSelection(t *testing.T) {
+	t.Parallel()
 	r := New(0.05, 0.6)
 	r.RecordSelection(1)
 	r.RecordSelection(1)
@@ -23,6 +24,7 @@ func TestRecordSelection(t *testing.T) {
 }
 
 func TestPopularityScoreDecay(t *testing.T) {
+	t.Parallel()
 	r := New(0.05, 0.6)
 
 	now := time.Now()
@@ -44,6 +46,7 @@ func TestPopularityScoreDecay(t *testing.T) {
 }
 
 func TestPopularityScoreNoSelections(t *testing.T) {
+	t.Parallel()
 	r := New(0.05, 0.6)
 	score := r.PopularityScore(99)
 	if score != 0 {
@@ -52,6 +55,7 @@ func TestPopularityScoreNoSelections(t *testing.T) {
 }
 
 func TestNormalizedPopularity(t *testing.T) {
+	t.Parallel()
 	r := New(0.05, 0.6)
 	now := time.Now()
 	r.SetSelections(1, []time.Time{now, now, now})
@@ -69,6 +73,7 @@ func TestNormalizedPopularity(t *testing.T) {
 }
 
 func TestNormalizedPopularityNoSelections(t *testing.T) {
+	t.Parallel()
 	r := New(0.05, 0.6)
 	norm := r.NormalizedPopularity(1)
 	if norm != 0 {
@@ -77,6 +82,7 @@ func TestNormalizedPopularityNoSelections(t *testing.T) {
 }
 
 func TestCombinedScore(t *testing.T) {
+	t.Parallel()
 	r := New(0.05, 0.6)
 	now := time.Now()
 	r.SetSelections(1, []time.Time{now, now, now})
@@ -94,6 +100,7 @@ func TestCombinedScore(t *testing.T) {
 }
 
 func TestCombinedScoreZeroPopularity(t *testing.T) {
+	t.Parallel()
 	r := New(0.05, 0.6)
 	score := r.CombinedScore(99, 0.8)
 	// With no popularity data, score = alpha * relevance = 0.6 * 0.8 = 0.48
@@ -104,6 +111,7 @@ func TestCombinedScoreZeroPopularity(t *testing.T) {
 }
 
 func TestSaveAndLoad(t *testing.T) {
+	t.Parallel()
 	r := New(0.05, 0.6)
 	now := time.Now()
 	r.SetSelections(1, []time.Time{now, now.Add(-24 * time.Hour)})
@@ -138,6 +146,7 @@ func TestSaveAndLoad(t *testing.T) {
 }
 
 func TestLoadNonexistent(t *testing.T) {
+	t.Parallel()
 	r := New(0.05, 0.6)
 	err := r.Load("/nonexistent/path.json")
 	// Should not error — missing file means no prior data
@@ -147,6 +156,7 @@ func TestLoadNonexistent(t *testing.T) {
 }
 
 func TestPrune(t *testing.T) {
+	t.Parallel()
 	r := New(0.05, 0.6)
 	now := time.Now()
 	r.SetSelections(1, []time.Time{

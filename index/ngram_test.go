@@ -7,6 +7,7 @@ import (
 )
 
 func TestExtractTrigrams(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		input string
 		want  []string
@@ -42,6 +43,7 @@ func testProducts() []catalog.Product {
 }
 
 func TestNewIndex(t *testing.T) {
+	t.Parallel()
 	idx := NewIndex(testProducts())
 	if idx == nil {
 		t.Fatal("NewIndex returned nil")
@@ -49,6 +51,7 @@ func TestNewIndex(t *testing.T) {
 }
 
 func TestSearchPrefix(t *testing.T) {
+	t.Parallel()
 	idx := NewIndex(testProducts())
 	results := idx.Search("nik")
 	if len(results) == 0 {
@@ -74,6 +77,7 @@ func TestSearchPrefix(t *testing.T) {
 }
 
 func TestSearchSubstring(t *testing.T) {
+	t.Parallel()
 	idx := NewIndex(testProducts())
 	results := idx.Search("pod")
 	found := false
@@ -88,6 +92,7 @@ func TestSearchSubstring(t *testing.T) {
 }
 
 func TestSearchFuzzy(t *testing.T) {
+	t.Parallel()
 	idx := NewIndex(testProducts())
 	results := idx.Search("budwiser")
 	found := false
@@ -102,6 +107,7 @@ func TestSearchFuzzy(t *testing.T) {
 }
 
 func TestSearchShortQuery(t *testing.T) {
+	t.Parallel()
 	idx := NewIndex(testProducts())
 	results := idx.Search("ni")
 	found := false
@@ -116,6 +122,7 @@ func TestSearchShortQuery(t *testing.T) {
 }
 
 func TestSearchEmpty(t *testing.T) {
+	t.Parallel()
 	idx := NewIndex(testProducts())
 	results := idx.Search("")
 	if len(results) != 0 {
@@ -124,6 +131,7 @@ func TestSearchEmpty(t *testing.T) {
 }
 
 func TestSearchResultScore(t *testing.T) {
+	t.Parallel()
 	idx := NewIndex(testProducts())
 	results := idx.Search("budweiser")
 	for _, r := range results {
@@ -138,6 +146,7 @@ func TestSearchResultScore(t *testing.T) {
 }
 
 func TestSearchCategories(t *testing.T) {
+	t.Parallel()
 	idx := NewIndex(testProducts())
 	results := idx.SearchCategories("bee")
 	if len(results) == 0 {
@@ -149,6 +158,7 @@ func TestSearchCategories(t *testing.T) {
 }
 
 func TestSearchCategoriesNoMatch(t *testing.T) {
+	t.Parallel()
 	idx := NewIndex(testProducts())
 	results := idx.SearchCategories("zzz")
 	if len(results) != 0 {
@@ -157,6 +167,7 @@ func TestSearchCategoriesNoMatch(t *testing.T) {
 }
 
 func TestProductsByCategory(t *testing.T) {
+	t.Parallel()
 	idx := NewIndex(testProducts())
 	ids := idx.ProductsByCategory("beer")
 	if len(ids) != 2 {
@@ -165,6 +176,7 @@ func TestProductsByCategory(t *testing.T) {
 }
 
 func TestPrefixSearchBinarySearch(t *testing.T) {
+	t.Parallel()
 	products := []catalog.Product{
 		{Name: "Apple Juice", Category: "drinks"},
 		{Name: "Banana Split", Category: "dessert"},
@@ -197,6 +209,7 @@ func TestPrefixSearchBinarySearch(t *testing.T) {
 }
 
 func TestSearchSaturationSafety(t *testing.T) {
+	t.Parallel()
 	longName := "abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz"
 	products := []catalog.Product{
 		{Name: longName, Category: "test"},
@@ -209,6 +222,7 @@ func TestSearchSaturationSafety(t *testing.T) {
 }
 
 func TestSearchDeduplicatesRepeatedTrigrams(t *testing.T) {
+	t.Parallel()
 	products := []catalog.Product{
 		{Name: "Banana", Category: "fruit"},
 	}

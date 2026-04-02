@@ -28,8 +28,6 @@ type payload struct {
 var (
 	decoded        payload
 	productsByName map[string]*Product
-	initOnce       sync.Once
-	nameIndexOnce  sync.Once
 	initErr        error
 )
 
@@ -53,28 +51,24 @@ func decodePayload(data []byte) (payload, error) {
 	return decoded, nil
 }
 
-func initEmbedded() {
-	initOnce.Do(func() {
-		payload, err := decodePayload(rawCBOR)
-		if err != nil {
-			initErr = err
-			return
-		}
-		decoded = payload
-	})
-}
+var initEmbedded = sync.OnceFunc(func() {
+	p, err := decodePayload(rawCBOR)
+	if err != nil {
+		initErr = err
+		return
+	}
+	decoded = p
+})
 
-func initProductsByName() {
-	nameIndexOnce.Do(func() {
-		if initErr != nil {
-			return
-		}
-		productsByName = make(map[string]*Product, len(decoded.Products))
-		for i := range decoded.Products {
-			productsByName[decoded.Products[i].Name] = &decoded.Products[i]
-		}
-	})
-}
+var initProductsByName = sync.OnceFunc(func() {
+	if initErr != nil {
+		return
+	}
+	productsByName = make(map[string]*Product, len(decoded.Products))
+	for i := range decoded.Products {
+		productsByName[decoded.Products[i].Name] = &decoded.Products[i]
+	}
+})
 
 // EmbeddedProducts returns all products from the compile-time embedded CBOR data.
 // The first call decompresses and unmarshals; subsequent calls return cached data.

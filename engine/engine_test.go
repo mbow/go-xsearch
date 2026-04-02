@@ -17,6 +17,7 @@ func testProducts() []catalog.Product {
 }
 
 func TestNewEngine(t *testing.T) {
+	t.Parallel()
 	e := New(testProducts())
 	if e == nil {
 		t.Fatal("New() returned nil")
@@ -24,6 +25,7 @@ func TestNewEngine(t *testing.T) {
 }
 
 func TestSearchDirectMatch(t *testing.T) {
+	t.Parallel()
 	e := New(testProducts())
 	results := e.Search("nike")
 	if len(results) == 0 {
@@ -42,6 +44,7 @@ func TestSearchDirectMatch(t *testing.T) {
 }
 
 func TestSearchBloomRejection(t *testing.T) {
+	t.Parallel()
 	e := New(testProducts())
 	// Completely unrelated query — Bloom should reject most/all trigrams
 	results := e.Search("xzqwvp")
@@ -54,6 +57,7 @@ func TestSearchBloomRejection(t *testing.T) {
 }
 
 func TestSearchCategoryFallback(t *testing.T) {
+	t.Parallel()
 	e := New(testProducts())
 	results := e.Search("beer")
 	if len(results) == 0 {
@@ -73,6 +77,7 @@ func TestSearchCategoryFallback(t *testing.T) {
 }
 
 func TestSearchFuzzyMatch(t *testing.T) {
+	t.Parallel()
 	e := New(testProducts())
 	results := e.Search("budwiser")
 	foundBud := false
@@ -87,6 +92,7 @@ func TestSearchFuzzyMatch(t *testing.T) {
 }
 
 func TestSearchSortedByScore(t *testing.T) {
+	t.Parallel()
 	e := New(testProducts())
 	results := e.Search("nike")
 	for i := 1; i < len(results); i++ {
@@ -98,6 +104,7 @@ func TestSearchSortedByScore(t *testing.T) {
 }
 
 func TestSearchRecordAndRank(t *testing.T) {
+	t.Parallel()
 	e := New(testProducts())
 
 	// Select Nike Dunk Low several times
@@ -131,6 +138,7 @@ func TestSearchRecordAndRank(t *testing.T) {
 }
 
 func TestSearchHighlighting(t *testing.T) {
+	t.Parallel()
 	products := []catalog.Product{
 		{Name: "Budweiser", Category: "beer"},
 		{Name: "Bud Light", Category: "beer"},
@@ -159,6 +167,7 @@ func TestSearchHighlighting(t *testing.T) {
 }
 
 func TestSearchBudRanking(t *testing.T) {
+	t.Parallel()
 	products := []catalog.Product{
 		{Name: "Budweiser", Category: "beer"},
 		{Name: "Bud Light", Category: "beer"},
@@ -209,6 +218,7 @@ func TestSearchBudRanking(t *testing.T) {
 }
 
 func TestRecordSelectionMarksOnlySelectedCategoryDirty(t *testing.T) {
+	t.Parallel()
 	products := []catalog.Product{
 		{Name: "Budweiser", Category: "beer"},
 		{Name: "Miller Lite", Category: "beer"},

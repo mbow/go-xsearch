@@ -9,6 +9,7 @@ package index
 
 import (
 	"cmp"
+	"iter"
 	"maps"
 	"slices"
 	"strings"
@@ -397,8 +398,7 @@ func (idx *Index) ProductsByCategory(category string) []int {
 	return idx.catProducts[category]
 }
 
-// CategoryNames returns the category-to-product-IDs map, allowing callers
-// to iterate category names without copying.
-func (idx *Index) CategoryNames() map[string][]int {
-	return idx.catProducts
+// CategoryNames returns an iterator over all category names.
+func (idx *Index) CategoryNames() iter.Seq[string] {
+	return maps.Keys(idx.catProducts)
 }

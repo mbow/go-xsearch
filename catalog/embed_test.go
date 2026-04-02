@@ -5,6 +5,7 @@ import (
 )
 
 func TestEmbeddedProducts(t *testing.T) {
+	t.Parallel()
 	products, err := EmbeddedProducts()
 	if err != nil {
 		t.Fatalf("EmbeddedProducts() error: %v", err)
@@ -24,6 +25,7 @@ func TestEmbeddedProducts(t *testing.T) {
 }
 
 func TestEmbeddedCount(t *testing.T) {
+	t.Parallel()
 	count, err := EmbeddedCount()
 	if err != nil {
 		t.Fatalf("EmbeddedCount() error: %v", err)
@@ -35,6 +37,7 @@ func TestEmbeddedCount(t *testing.T) {
 }
 
 func TestGetByName(t *testing.T) {
+	t.Parallel()
 	// Use a non-beer product that has a stable name
 	p, err := GetByName("Coca-Cola")
 	if err != nil {
@@ -49,6 +52,7 @@ func TestGetByName(t *testing.T) {
 }
 
 func TestGetByNameNotFound(t *testing.T) {
+	t.Parallel()
 	p, err := GetByName("Nonexistent Product")
 	if err != nil {
 		t.Fatalf("GetByName() error: %v", err)
@@ -59,6 +63,7 @@ func TestGetByNameNotFound(t *testing.T) {
 }
 
 func TestGetByID(t *testing.T) {
+	t.Parallel()
 	p, err := GetByID(0)
 	if err != nil {
 		t.Fatalf("GetByID() error: %v", err)
@@ -72,6 +77,7 @@ func TestGetByID(t *testing.T) {
 }
 
 func TestGetByIDNotFound(t *testing.T) {
+	t.Parallel()
 	p, err := GetByID(99999)
 	if err != nil {
 		t.Fatalf("GetByID() error: %v", err)
@@ -82,6 +88,7 @@ func TestGetByIDNotFound(t *testing.T) {
 }
 
 func TestEmbeddedMatchesJSON(t *testing.T) {
+	t.Parallel()
 	// Verify CBOR embedded data matches the JSON source
 	jsonProducts, err := LoadProducts("../data/products.json")
 	if err != nil {

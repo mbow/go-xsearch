@@ -27,6 +27,7 @@ func testApp() *App {
 }
 
 func TestHandleIndex(t *testing.T) {
+	t.Parallel()
 	app := testApp()
 
 	req := httptest.NewRequest("GET", "/", nil)
@@ -46,6 +47,7 @@ func TestHandleIndex(t *testing.T) {
 }
 
 func TestHandleSearch(t *testing.T) {
+	t.Parallel()
 	app := testApp()
 
 	req := httptest.NewRequest("GET", "/search?q=nik", nil)
@@ -62,6 +64,7 @@ func TestHandleSearch(t *testing.T) {
 }
 
 func TestHandleSearchEmpty(t *testing.T) {
+	t.Parallel()
 	app := testApp()
 
 	req := httptest.NewRequest("GET", "/search?q=", nil)
@@ -74,6 +77,7 @@ func TestHandleSearchEmpty(t *testing.T) {
 }
 
 func TestHandleSelect(t *testing.T) {
+	t.Parallel()
 	app := testApp()
 
 	body := strings.NewReader(`{"id": "0"}`)
@@ -88,6 +92,7 @@ func TestHandleSelect(t *testing.T) {
 }
 
 func TestHandleSelectInvalidID(t *testing.T) {
+	t.Parallel()
 	app := testApp()
 
 	body := strings.NewReader(`{"id": "abc"}`)

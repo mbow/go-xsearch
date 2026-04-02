@@ -8,6 +8,7 @@ import (
 )
 
 func TestTokenize(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		input string
@@ -43,6 +44,7 @@ func testProducts() []catalog.Product {
 }
 
 func TestNewIndex(t *testing.T) {
+	t.Parallel()
 	idx := NewIndex(testProducts())
 
 	// IDF exists for "budweiser"
@@ -84,6 +86,7 @@ func TestNewIndex(t *testing.T) {
 }
 
 func TestScore(t *testing.T) {
+	t.Parallel()
 	idx := NewIndex(testProducts())
 	terms := Tokenize("budweiser")
 
@@ -101,6 +104,7 @@ func TestScore(t *testing.T) {
 }
 
 func TestSearch(t *testing.T) {
+	t.Parallel()
 	idx := NewIndex(testProducts())
 	results := idx.Search("budweiser")
 
@@ -113,6 +117,7 @@ func TestSearch(t *testing.T) {
 }
 
 func TestSearch_PrefixBoost(t *testing.T) {
+	t.Parallel()
 	idx := NewIndex(testProducts())
 	results := idx.Search("bud")
 
@@ -134,6 +139,7 @@ func TestSearch_PrefixBoost(t *testing.T) {
 }
 
 func TestSearch_NoResults(t *testing.T) {
+	t.Parallel()
 	idx := NewIndex(testProducts())
 	results := idx.Search("xyzzyplugh")
 
@@ -143,6 +149,7 @@ func TestSearch_NoResults(t *testing.T) {
 }
 
 func TestSearch_Empty(t *testing.T) {
+	t.Parallel()
 	idx := NewIndex(testProducts())
 	results := idx.Search("")
 
@@ -152,6 +159,7 @@ func TestSearch_Empty(t *testing.T) {
 }
 
 func TestSnapshotRoundTrip(t *testing.T) {
+	t.Parallel()
 	idx := NewIndex(testProducts())
 
 	// Get original results for "bud".
@@ -236,6 +244,7 @@ func BenchmarkBM25Search_CommonPrefix(b *testing.B) {
 }
 
 func TestNewIndex_PrefixCap(t *testing.T) {
+	t.Parallel()
 	products := []catalog.Product{
 		{Name: "Weihenstephaner Hefeweissbier", Category: "beer"},
 	}

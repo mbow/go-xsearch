@@ -3,6 +3,7 @@ package bloom
 import "testing"
 
 func TestFnv1a(t *testing.T) {
+	t.Parallel()
 	h1 := fnv1a("hello")
 	h2 := fnv1a("hello")
 	h3 := fnv1a("world")
@@ -19,6 +20,7 @@ func TestFnv1a(t *testing.T) {
 }
 
 func TestDjb2(t *testing.T) {
+	t.Parallel()
 	h1 := djb2("hello")
 	h2 := djb2("hello")
 	h3 := djb2("world")
@@ -35,6 +37,7 @@ func TestDjb2(t *testing.T) {
 }
 
 func TestHashIndependence(t *testing.T) {
+	t.Parallel()
 	f := fnv1a("test")
 	d := djb2("test")
 	if f == d {
@@ -43,6 +46,7 @@ func TestHashIndependence(t *testing.T) {
 }
 
 func TestNewFilter(t *testing.T) {
+	t.Parallel()
 	f := New(1000, 3)
 	if f == nil {
 		t.Fatal("New() returned nil")
@@ -50,6 +54,7 @@ func TestNewFilter(t *testing.T) {
 }
 
 func TestAddAndMayContain(t *testing.T) {
+	t.Parallel()
 	f := New(1000, 3)
 	f.Add("sho")
 	f.Add("hoe")
@@ -67,6 +72,7 @@ func TestAddAndMayContain(t *testing.T) {
 }
 
 func TestMayContainNeverAdded(t *testing.T) {
+	t.Parallel()
 	f := New(20000, 3)
 
 	f.Add("abc")
@@ -87,6 +93,7 @@ func TestMayContainNeverAdded(t *testing.T) {
 }
 
 func TestNoFalseNegatives(t *testing.T) {
+	t.Parallel()
 	f := New(20000, 3)
 	items := []string{"abc", "def", "ghi", "jkl", "mno", "pqr", "stu", "vwx"}
 
