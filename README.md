@@ -1,15 +1,15 @@
+  # go-xsearch
+
 <div align="center">
-# go-xsearch
-
   <img src="docs/logo.png" alt="go-xsearch" width="180" />
+</div>
 
-**Autocomplete search engine. Single binary. Zero infrastructure.**
-
-[![CI](https://github.com/mbow/go-xsearch/actions/workflows/ci.yml/badge.svg)](https://github.com/mbow/go-xsearch/actions/workflows/ci.yml)
-[![Go](https://img.shields.io/badge/Go-1.26-00ADD8?logo=go&logoColor=white)](https://go.dev)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Go Report Card](https://goreportcard.com/badge/github.com/mbow/go-xsearch)](https://goreportcard.com/report/github.com/mbow/go-xsearch)
-
+<div align="center">
+  **Autocomplete search engine. Single binary. Zero infrastructure.**
+  [![CI](https://github.com/mbow/go-xsearch/actions/workflows/ci.yml/badge.svg)](https://github.com/mbow/go-xsearch/actions/workflows/ci.yml)
+  [![Go](https://img.shields.io/badge/Go-1.26-00ADD8?logo=go&logoColor=white)](https://go.dev)
+  [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+  [![Go Report Card](https://goreportcard.com/badge/github.com/mbow/go-xsearch)](https://goreportcard.com/report/github.com/mbow/go-xsearch)
 </div>
 
 A cold-cache search — including BM25 scoring, typo correction, popularity
