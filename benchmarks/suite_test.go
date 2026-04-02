@@ -289,7 +289,7 @@ func BenchmarkIndex_BestCategory(b *testing.B) {
 }
 
 func BenchmarkRanking_CombinedScore(b *testing.B) {
-	r := ranking.New(0.05, 0.6)
+	r := ranking.New(0.05, 0.6, 1000)
 	for range 50 {
 		r.RecordSelection(0)
 	}
@@ -300,7 +300,7 @@ func BenchmarkRanking_CombinedScore(b *testing.B) {
 }
 
 func BenchmarkRanking_CombinedScore_NoSelections(b *testing.B) {
-	r := ranking.New(0.05, 0.6)
+	r := ranking.New(0.05, 0.6, 1000)
 	b.ResetTimer()
 	for b.Loop() {
 		r.CombinedScore(0, 0.8)
@@ -308,7 +308,7 @@ func BenchmarkRanking_CombinedScore_NoSelections(b *testing.B) {
 }
 
 func BenchmarkRanking_Scorer(b *testing.B) {
-	r := ranking.New(0.05, 0.6)
+	r := ranking.New(0.05, 0.6, 1000)
 	for range 50 {
 		r.RecordSelection(0)
 	}

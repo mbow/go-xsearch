@@ -25,20 +25,22 @@ type Ranker struct {
 	mu            sync.RWMutex
 	lambda        float64
 	alpha         float64
+	numProducts   int
 	selections    map[int][]time.Time
 	snapshotDirty bool
 	snapshot      popularitySnapshot
 }
 
 type popularitySnapshot struct {
-	normalized map[int]float64
+	scores []float64 // indexed by product ID, normalized to 0.0-1.0
 }
 
-// New creates a Ranker with the given decay rate and alpha.
-func New(lambda, alpha float64) *Ranker {
+// New creates a Ranker with the given decay rate, alpha, and product count.
+func New(lambda, alpha float64, numProducts int) *Ranker {
 	return &Ranker{
 		lambda:        lambda,
 		alpha:         alpha,
+		numProducts:   numProducts,
 		selections:    make(map[int][]time.Time),
 		snapshotDirty: true,
 	}
@@ -87,32 +89,34 @@ func (r *Ranker) rebuildSnapshotLocked() {
 	}
 
 	now := time.Now()
-	normalized := make(map[int]float64, len(r.selections))
+	scores := make([]float64, r.numProducts)
 	maxScore := 0.0
 	for id, timestamps := range r.selections {
+		if id < 0 || id >= r.numProducts {
+			continue
+		}
 		var s float64
 		for _, ts := range timestamps {
 			ageDays := now.Sub(ts).Hours() / 24
 			s += math.Exp(-r.lambda * ageDays)
 		}
-		if s == 0 {
-			continue
-		}
-		normalized[id] = s
+		scores[id] = s
 		if s > maxScore {
 			maxScore = s
 		}
 	}
 
 	if maxScore > 0 {
-		for id, s := range normalized {
-			normalized[id] = s / maxScore
+		for i, s := range scores {
+			if s > 0 {
+				scores[i] = s / maxScore
+			}
 		}
 	} else {
-		normalized = nil
+		scores = nil
 	}
 
-	r.snapshot = popularitySnapshot{normalized: normalized}
+	r.snapshot = popularitySnapshot{scores: scores}
 	r.snapshotDirty = false
 }
 
@@ -135,10 +139,10 @@ func (r *Ranker) snapshotView() (popularitySnapshot, float64) {
 }
 
 func (s popularitySnapshot) score(productID int) float64 {
-	if s.normalized == nil {
+	if productID < 0 || productID >= len(s.scores) {
 		return 0
 	}
-	return s.normalized[productID]
+	return s.scores[productID]
 }
 
 // PopularityScore computes the raw exponential decay score for a product.

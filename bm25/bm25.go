@@ -85,12 +85,22 @@ type Index struct {
 func Tokenize(s string) []string {
 	var tokens []string
 	for field := range strings.FieldsSeq(s) {
-		lower := strings.ToLower(field)
+		lower := toLowerFast(field)
 		if hasAlphanumeric(lower) {
 			tokens = append(tokens, lower)
 		}
 	}
 	return tokens
+}
+
+// toLowerFast returns s lowercased, avoiding allocation if s is already lowercase ASCII.
+func toLowerFast(s string) string {
+	for i := range len(s) {
+		if s[i] >= 'A' && s[i] <= 'Z' {
+			return strings.ToLower(s)
+		}
+	}
+	return s
 }
 
 // hasAlphanumeric reports whether s contains at least one alphanumeric character.

@@ -10,7 +10,7 @@ import (
 
 func TestRecordSelection(t *testing.T) {
 	t.Parallel()
-	r := New(0.05, 0.6)
+	r := New(0.05, 0.6, 100)
 	r.RecordSelection(1)
 	r.RecordSelection(1)
 	r.RecordSelection(2)
@@ -25,7 +25,7 @@ func TestRecordSelection(t *testing.T) {
 
 func TestPopularityScoreDecay(t *testing.T) {
 	t.Parallel()
-	r := New(0.05, 0.6)
+	r := New(0.05, 0.6, 100)
 
 	now := time.Now()
 	r.SetSelections(1, []time.Time{now})
@@ -47,7 +47,7 @@ func TestPopularityScoreDecay(t *testing.T) {
 
 func TestPopularityScoreNoSelections(t *testing.T) {
 	t.Parallel()
-	r := New(0.05, 0.6)
+	r := New(0.05, 0.6, 100)
 	score := r.PopularityScore(99)
 	if score != 0 {
 		t.Errorf("expected 0 for unselected product, got %f", score)
@@ -56,7 +56,7 @@ func TestPopularityScoreNoSelections(t *testing.T) {
 
 func TestNormalizedPopularity(t *testing.T) {
 	t.Parallel()
-	r := New(0.05, 0.6)
+	r := New(0.05, 0.6, 100)
 	now := time.Now()
 	r.SetSelections(1, []time.Time{now, now, now})
 	r.SetSelections(2, []time.Time{now})
@@ -74,7 +74,7 @@ func TestNormalizedPopularity(t *testing.T) {
 
 func TestNormalizedPopularityNoSelections(t *testing.T) {
 	t.Parallel()
-	r := New(0.05, 0.6)
+	r := New(0.05, 0.6, 100)
 	norm := r.NormalizedPopularity(1)
 	if norm != 0 {
 		t.Errorf("expected 0 when no selections exist, got %f", norm)
@@ -83,7 +83,7 @@ func TestNormalizedPopularityNoSelections(t *testing.T) {
 
 func TestCombinedScore(t *testing.T) {
 	t.Parallel()
-	r := New(0.05, 0.6)
+	r := New(0.05, 0.6, 100)
 	now := time.Now()
 	r.SetSelections(1, []time.Time{now, now, now})
 	r.SetSelections(2, []time.Time{now})
@@ -101,7 +101,7 @@ func TestCombinedScore(t *testing.T) {
 
 func TestCombinedScoreZeroPopularity(t *testing.T) {
 	t.Parallel()
-	r := New(0.05, 0.6)
+	r := New(0.05, 0.6, 100)
 	score := r.CombinedScore(99, 0.8)
 	// With no popularity data, score = alpha * relevance = 0.6 * 0.8 = 0.48
 	expected := 0.6 * 0.8
@@ -112,7 +112,7 @@ func TestCombinedScoreZeroPopularity(t *testing.T) {
 
 func TestSaveAndLoad(t *testing.T) {
 	t.Parallel()
-	r := New(0.05, 0.6)
+	r := New(0.05, 0.6, 100)
 	now := time.Now()
 	r.SetSelections(1, []time.Time{now, now.Add(-24 * time.Hour)})
 	r.SetSelections(5, []time.Time{now.Add(-48 * time.Hour)})
@@ -129,7 +129,7 @@ func TestSaveAndLoad(t *testing.T) {
 		t.Fatalf("expected file to exist: %v", err)
 	}
 
-	r2 := New(0.05, 0.6)
+	r2 := New(0.05, 0.6, 100)
 	if err := r2.Load(path); err != nil {
 		t.Fatalf("Load() error: %v", err)
 	}
@@ -147,7 +147,7 @@ func TestSaveAndLoad(t *testing.T) {
 
 func TestLoadNonexistent(t *testing.T) {
 	t.Parallel()
-	r := New(0.05, 0.6)
+	r := New(0.05, 0.6, 100)
 	err := r.Load("/nonexistent/path.json")
 	// Should not error — missing file means no prior data
 	if err != nil {
@@ -157,7 +157,7 @@ func TestLoadNonexistent(t *testing.T) {
 
 func TestPrune(t *testing.T) {
 	t.Parallel()
-	r := New(0.05, 0.6)
+	r := New(0.05, 0.6, 100)
 	now := time.Now()
 	r.SetSelections(1, []time.Time{
 		now,

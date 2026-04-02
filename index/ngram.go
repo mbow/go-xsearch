@@ -167,39 +167,50 @@ func NewIndex(products []catalog.Product) *Index {
 
 // Search returns products matching query, scored by Jaccard similarity.
 // For queries shorter than 3 characters, it falls back to prefix matching.
-//
-// The algorithm processes trigrams from rarest to most common posting list,
-// caps candidates at [maxCandidates], and only scores those with enough
-// trigram overlap to avoid wasted work on large catalogs.
 func (idx *Index) Search(query string) []SearchResult {
 	query = strings.ToLower(strings.TrimSpace(query))
 	if query == "" {
 		return nil
 	}
-
 	if len(query) < 3 {
 		return idx.prefixSearch(query)
 	}
-
 	queryGrams := ExtractTrigrams(query)
 	if len(queryGrams) == 0 {
 		return nil
 	}
+	return idx.searchWithGrams(queryGrams)
+}
 
-	// Deduplicate query trigrams.
-	querySet := make(map[string]struct{}, len(queryGrams))
+// SearchWithGrams performs a Jaccard trigram search using pre-extracted trigrams.
+// Use this to avoid redundant ExtractTrigrams calls when trigrams are already available.
+func (idx *Index) SearchWithGrams(queryGrams []string) []SearchResult {
+	if len(queryGrams) == 0 {
+		return nil
+	}
+	return idx.searchWithGrams(queryGrams)
+}
+
+// gramEntry pairs a trigram with its posting list size for rarity-first sorting.
+type gramEntry struct {
+	gram string
+	size int
+}
+
+// searchWithGrams is the core Jaccard search implementation.
+// It processes trigrams from rarest to most common posting list,
+// caps candidates at maxCandidates, and only scores those with enough
+// trigram overlap to avoid wasted work on large catalogs.
+func (idx *Index) searchWithGrams(queryGrams []string) []SearchResult {
+	// Deduplicate query trigrams in-place (sort + compact, avoids map alloc).
+	slices.Sort(queryGrams)
+	queryGrams = slices.Compact(queryGrams)
+	numQueryGrams := len(queryGrams)
+
+	// Sort by posting list size (rarest first). Stack-allocate for typical queries.
+	var sortBuf [16]gramEntry
+	sorted := sortBuf[:0]
 	for _, g := range queryGrams {
-		querySet[g] = struct{}{}
-	}
-	numQueryGrams := len(querySet)
-
-	// Sort query trigrams by posting list size (rarest first).
-	type gramEntry struct {
-		gram string
-		size int
-	}
-	sorted := make([]gramEntry, 0, numQueryGrams)
-	for g := range querySet {
 		sorted = append(sorted, gramEntry{g, len(idx.posting[g])})
 	}
 	slices.SortFunc(sorted, func(a, b gramEntry) int {
@@ -215,7 +226,9 @@ func (idx *Index) Search(query string) []SearchResult {
 		maxCandidates    = 500 // stop expanding after this many candidates
 	)
 
-	var touched []int
+	// Stack-allocate touched buffer for the common case (< 256 candidates).
+	var touchBuf [256]int
+	touched := touchBuf[:0]
 	for _, id := range idx.posting[sorted[0].gram] {
 		if hits[id] < 255 {
 			hits[id]++
@@ -237,8 +250,7 @@ func (idx *Index) Search(query string) []SearchResult {
 		}
 	}
 
-	// Minimum hit threshold: require ≥ 1/3 of query trigrams to match.
-	// Cap at 255 to prevent uint8 overflow for extremely long queries.
+	// Minimum hit threshold: require >= 1/3 of query trigrams to match.
 	minHits := uint8(min(255, max(1, numQueryGrams/3)))
 
 	// Score candidates that pass the threshold.
@@ -365,16 +377,26 @@ func (idx *Index) BestCategory(query string) (string, bool) {
 		return best, best != ""
 	}
 
-	querySet := make(map[string]struct{}, len(queryGrams))
-	for _, g := range queryGrams {
-		querySet[g] = struct{}{}
-	}
+	return idx.bestCategoryWithGrams(queryGrams), true
+}
 
+// BestCategoryWithGrams returns the best-matching category using pre-extracted trigrams.
+func (idx *Index) BestCategoryWithGrams(queryGrams []string) (string, bool) {
+	if len(queryGrams) == 0 {
+		return "", false
+	}
+	best := idx.bestCategoryWithGrams(queryGrams)
+	return best, best != ""
+}
+
+func (idx *Index) bestCategoryWithGrams(queryGrams []string) string {
 	bestName := ""
 	bestScore := 0.0
+	numQueryGrams := len(queryGrams)
+
 	for cat, catGrams := range idx.catTrigrams {
 		intersection := 0
-		for g := range querySet {
+		for _, g := range queryGrams {
 			if _, ok := catGrams[g]; ok {
 				intersection++
 			}
@@ -382,15 +404,14 @@ func (idx *Index) BestCategory(query string) (string, bool) {
 		if intersection == 0 {
 			continue
 		}
-		unionSize := len(querySet) + len(catGrams) - intersection
+		unionSize := numQueryGrams + len(catGrams) - intersection
 		score := float64(intersection) / float64(unionSize)
 		if score > bestScore || (score == bestScore && (bestName == "" || cat < bestName)) {
 			bestName = cat
 			bestScore = score
 		}
 	}
-
-	return bestName, bestName != ""
+	return bestName
 }
 
 // ProductsByCategory returns the product IDs belonging to the given category.

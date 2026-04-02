@@ -79,7 +79,7 @@ func New(products []catalog.Product) *Engine {
 		products: products,
 		bloom:    bloom.New(max(bloomMinSize, uint64(len(products))*bloomBitsPerItem), bloomHashCount),
 		index:    index.NewIndex(products),
-		ranker:   ranking.New(lambda, alpha),
+		ranker:   ranking.New(lambda, alpha, len(products)),
 		bm25idx:  bm25.NewIndex(products),
 	}
 
@@ -137,7 +137,7 @@ func NewFromEmbedded(products []catalog.Product, bloomRaw, indexRaw, bm25Raw []b
 		products: products,
 		bloom:    bloom.FromSnapshot(bs),
 		index:    index.FromSnapshot(is, products),
-		ranker:   ranking.New(lambda, alpha),
+		ranker:   ranking.New(lambda, alpha, len(products)),
 		bm25idx:  bm25Idx,
 	}
 
@@ -240,20 +240,22 @@ func (e *Engine) searchInternal(query string) []Result {
 		return score
 	}
 
-	// Try BM25 path first (word-level matching)
-	bm25Results := e.bm25idx.Search(query)
-	if len(bm25Results) > 0 {
-		return e.buildBM25Results(bm25Results, getScorer(), query)
-	}
-
-	// Fallback to Jaccard trigram path (handles typos/fuzzy)
+	// Extract trigrams once — reused by Bloom check, Jaccard search, and category lookup.
 	trigrams := index.ExtractTrigrams(query)
+
+	// Short queries (< 3 chars): no trigrams available, try BM25 then prefix search.
 	if len(trigrams) == 0 {
+		bm25Results := e.bm25idx.Search(query)
+		if len(bm25Results) > 0 {
+			return e.buildBM25Results(bm25Results, getScorer(), query)
+		}
 		results := e.buildResults(e.index.Search(query), MatchDirect, getScorer())
 		e.addHighlights(results, query)
 		return results
 	}
 
+	// Bloom pre-check: if no trigrams pass, skip BM25 and Jaccard entirely.
+	// Only category fallback is possible (reusing pre-extracted trigrams).
 	anyPass := false
 	for _, g := range trigrams {
 		if e.bloom.MayContain(g) {
@@ -261,28 +263,36 @@ func (e *Engine) searchInternal(query string) []Result {
 			break
 		}
 	}
+	if !anyPass {
+		if bestCat, ok := e.index.BestCategoryWithGrams(trigrams); ok {
+			return e.categoryFallback(bestCat, nil, getScorer())
+		}
+		return nil
+	}
+
+	// Bloom passed — try BM25 first (primary path for well-formed queries).
+	bm25Results := e.bm25idx.Search(query)
+	if len(bm25Results) > 0 {
+		return e.buildBM25Results(bm25Results, getScorer(), query)
+	}
+
+	// BM25 miss — Jaccard trigram fallback (handles typos/fuzzy).
+	// Passes pre-extracted trigrams to avoid recomputing them.
+	searchResults := e.index.SearchWithGrams(trigrams)
 
 	results := make([]Result, 0, maxResults)
+	goodResults := 0
+	for _, sr := range searchResults {
+		if sr.Score >= fallbackThreshold {
+			goodResults++
+		}
+	}
+	results = append(results, e.buildResults(searchResults, MatchDirect, getScorer())...)
 
-	if anyPass {
-		searchResults := e.index.Search(query)
-		goodResults := 0
-		for _, sr := range searchResults {
-			if sr.Score >= fallbackThreshold {
-				goodResults++
-			}
-		}
-		results = append(results, e.buildResults(searchResults, MatchDirect, getScorer())...)
-		if goodResults < minDirectResults {
-			if bestCat, ok := e.index.BestCategory(query); ok {
-				fallbackResults := e.categoryFallback(bestCat, searchResults, getScorer())
-				results = append(results, fallbackResults...)
-			}
-		}
-	} else {
-		// Check if any categories match before creating the Scorer.
-		if bestCat, ok := e.index.BestCategory(query); ok {
-			results = append(results, e.categoryFallback(bestCat, nil, getScorer())...)
+	if goodResults < minDirectResults {
+		if bestCat, ok := e.index.BestCategoryWithGrams(trigrams); ok {
+			fallbackResults := e.categoryFallback(bestCat, searchResults, getScorer())
+			results = append(results, fallbackResults...)
 		}
 	}
 
