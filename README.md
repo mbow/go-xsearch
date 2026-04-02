@@ -4,9 +4,9 @@
 
 # go-xsearch
 
-A fast, zero-dependency** autocomplete search engine built with Go and HTMX. (**
-requires CBOR but can be removed for fast start times but not required for all
-use cases)
+A fast autocomplete search engine built with Go and HTMX. One external
+dependency (CBOR for compact binary serialization). No database, no external
+services.
 
 ![Search Demo](docs/demo.gif)
 
@@ -14,19 +14,18 @@ use cases)
 
 ## Why This Exists
 
-You don't need a vector database, Redis, or Elasticsearch to build a fast
-product search even with 100,000 products.
+You don't need Elasticsearch, Redis, or a vector database to build fast
+product search.
 
-This project proves that a single Go binary — with no external services — can
-serve autocomplete results for **10,000+ products in under 3 milliseconds**,
-including typo correction, category fallback, and popularity ranking.
+A single Go binary — no external services — serves autocomplete for
+**10,000+ products in under 3 microseconds**, with typo correction, category
+fallback, and popularity ranking.
 
-It's designed for:
+Built for:
 
 - **Product catalogs** (e-commerce, inventory, menus)
-- **Internal tools** where spinning up infrastructure is overkill
-- **Serverless / Cloud Functions** where cold start time matters
-- **Learning** how search algorithms actually work under the hood
+- **Internal tools** where infrastructure is overkill
+- **Serverless / edge** where cold start time matters
 
 ## What It Does
 
@@ -48,10 +47,13 @@ top. Stale popularity fades over time.
 User types "bud"
     |
     v
-[BM25 Index] -- word-level match? "bud" is a prefix of "budweiser" -- YES
+[Extract trigrams] -- "bud" → ["bud"]
     |
     v
-[BM25 + Prefix Boost] -- score by term importance, boost prefix matches
+[Bloom filter] -- any trigram in the set? YES → continue
+    |
+    v
+[BM25 + Prefix Boost] -- "bud" is a prefix of "budweiser" → score + boost
     |
     v
 [Popularity Ranking] -- blend with click history (exponential decay)
@@ -63,59 +65,67 @@ User types "bud"
 [HTMX] -- swaps results into the page, ghost text overlays the input
 ```
 
-If the BM25 index finds no word-level matches (typo like "budwiser"), the system
-falls back to **trigram Jaccard scoring** — breaking the query into overlapping
-3-character substrings and ranking by overlap. A **Bloom filter** fast-rejects
-queries that definitely won't match anything.
+The Bloom filter rejects gibberish queries in ~500 ns before any scoring runs.
+When BM25 finds no word-level matches (typos like "budwiser"), the system falls
+back to **trigram Jaccard scoring** — overlapping 3-character substrings ranked
+by set overlap. This provides typo tolerance without edit distance computation.
 
 ## Performance
 
-Benchmarked on an AMD Ryzen 9 5950X with 10,000 products. All search data
-structures are precomputed and embedded in the binary — zero I/O at startup.
+Benchmarked on an AMD Ryzen 9 5950X with 10,000 products. All data structures
+are precomputed and embedded in the binary — zero I/O at startup.
 
-| Query Type                    | Example             |       Time | Allocations |
-| ----------------------------- | ------------------- | ---------: | ----------: |
-| Cached prefix (1-2 chars)     | `"b"`               |  **13 ns** |           0 |
-| Category match                | `"beer"`            |  **19 ns** |           0 |
-| Prefix (3+ chars, BM25)       | `"nik"`             | **840 ns** |           4 |
-| Bloom rejection (gibberish)   | `"xzqwvp"`          | **1.3 µs** |           4 |
-| Prefix boost                  | `"bud"`             | **2.6 µs** |          25 |
-| Fuzzy / typo (Jaccard)        | `"budwiser"`        | **2.8 µs** |          17 |
-| Full pipeline with popularity | `"budweiser"`       | **3.8 µs** |          18 |
-| HTTP response (warm cache)    | `GET /search?q=bud` | **2.3 µs** |          24 |
-| HTTP response (cold cache)    | `GET /search?q=bud` |  **40 µs** |         264 |
+| Query Type                    | Example             |       Time | Allocs | Bytes |
+| ----------------------------- | ------------------- | ---------: | -----: | ----: |
+| Cached prefix (1-2 chars)     | `"b"`               |  **13 ns** |      0 |     0 |
+| Category match                | `"beer"`            |  **18 ns** |      0 |     0 |
+| Prefix (3+ chars, BM25)       | `"nik"`             | **240 ns** |      1 |    16 |
+| Bloom rejection (gibberish)   | `"xzqwvp"`          | **524 ns** |      1 |    64 |
+| Fuzzy / typo (Jaccard)        | `"budwiser"`        | **1.8 µs** |      8 | 1,627 |
+| Full BM25 pipeline            | `"budweiser"`       | **2.5 µs** |      8 | 1,643 |
+| HTTP response (warm cache)    | `GET /search?q=bud` | **2.2 µs** |     24 | 9,021 |
+| HTTP response (cold cache)    | `GET /search?q=bud` |  **38 µs** |    256 |   118K |
+| Parallel search (32 threads)  | mixed queries        | **170 ns** |      7 |   902 |
 
-> 1 µs (microsecond) = 0.001 milliseconds. Most queries complete in **under 4
-> microseconds**. The full HTTP round-trip including template rendering is under
-> 40 µs on a cache miss.
+> 1 µs = 0.001 ms. Most queries complete in **under 3 microseconds**. The
+> Bloom filter rejects gibberish in 524 ns with a single allocation.
 
 ### Search Pipeline
 
 Queries flow through a hybrid pipeline: **BM25 word-level matching** (primary)
-with **Jaccard trigram fallback** (for typos). Results include match highlighting
-(`<mark>` tags), ghost text completion, and keyboard navigation.
+with **Jaccard trigram fallback** (for typos). A Bloom filter pre-check
+short-circuits gibberish queries before any scoring work begins.
 
 ```
-Query → BM25 word match? → YES → score + prefix boost + popularity → top 10
-                         → NO  → trigram Jaccard (typo tolerant) → top 10
-                                → category fallback if < 3 results
+Query → Extract trigrams → Bloom pre-check → REJECT → category fallback only
+                                           → PASS   → BM25 word match? → YES → score + popularity → top 10
+                                                                        → NO  → Jaccard trigram     → top 10
 ```
+
+Results include match highlighting (`<mark>` tags), ghost text completion, and
+keyboard navigation.
 
 ### Key Optimisations
 
-- **Typed min-heap** for top-K selection — no `container/heap` interface boxing
+- **Bloom-first pipeline** — rejects gibberish before BM25 or Jaccard runs
+- **Single trigram extraction** — computed once, passed to Bloom, Jaccard, and
+  category lookup (avoids 3x redundant work)
+- **Typed min-heap** for top-K — no `container/heap` interface boxing
 - **Pooled bitsets** for candidate dedup — zero-alloc on the hot path
-- **Pre-lowered product names** — avoids per-result `strings.ToLower`
-- **Sorted slices** replace per-product maps — eliminates 20K map allocations at startup
-- **Stack-allocated highlight buffers** — avoids heap escape for ≤ 4 highlights
-- **Binary search prefix fallback** — O(log n) for short queries vs O(n) linear scan
-- **Parallel prefix cache build** — startup scales with CPU cores
+- **Stack-allocated buffers** — trigram sort, candidate tracking, and highlight
+  arrays stay on the stack for typical queries
+- **Slice-indexed ranking** — popularity scores stored in `[]float64` indexed by
+  product ID, replacing map lookups
+- **Pre-lowered names** — avoids per-result `strings.ToLower`
+- **Sort+compact dedup** — replaces `map[string]struct{}` for trigram
+  deduplication
+- **Parallel prefix cache** — startup scales with CPU cores
 
 ### Startup
 
 The product catalog, Bloom filter, n-gram index, and BM25 index are all
-**pre-built at compile time** and embedded in the binary as gzip-compressed CBOR.
-There is zero file I/O at startup — the binary is ready to serve immediately.
+**pre-built at compile time** and embedded as gzip-compressed CBOR. Zero file
+I/O at startup — the binary serves immediately.
 
 ## Tech Stack
 
@@ -142,7 +152,10 @@ cd search
 go run .
 
 # Open in browser
-open http://localhost:8080
+open http://127.0.0.1:8080
+
+# Bind to a different address
+LISTEN_ADDR=0.0.0.0:8080 go run .
 ```
 
 ## Project Structure
@@ -201,8 +214,8 @@ False positives are possible; false negatives are not.
 Every product name and tag is broken into overlapping 3-character substrings
 (trigrams). An inverted index maps each trigram to the products that contain it.
 When BM25 finds no word-level matches (typos like "budwiser"), the system falls
-back to scoring by **Jaccard similarity** — the ratio of shared trigrams to total
-trigrams. This provides typo tolerance without edit distance computation.
+back to scoring by **Jaccard similarity** — the ratio of shared trigrams to
+total trigrams. This provides typo tolerance without edit distance computation.
 
 ### Exponential Decay Ranking
 
