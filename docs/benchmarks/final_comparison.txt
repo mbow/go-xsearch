@@ -1,98 +1,113 @@
-benchstat docs/benchmarks/baseline.txt docs/benchmarks/bench-latest.txt
+Comparing d62ac85 -> 3177ebf
 goos: linux
 goarch: amd64
 pkg: github.com/mbow/go-xsearch/benchmarks
 cpu: AMD Ryzen 9 5950X 16-Core Processor            
-                                      │ docs/benchmarks/baseline.txt │   docs/benchmarks/bench-latest.txt    │
-                                      │            sec/op            │    sec/op     vs base                 │
-Bloom_MayContain-32                                      6.110n ± 1%   6.155n ± ∞ ¹   +0.74% (p=0.035 n=6+5)
-Bloom_Miss-32                                            4.190n ± 1%   4.181n ± ∞ ¹        ~ (p=0.792 n=6+5)
-Index_ExtractTrigrams_Short-32                           22.20n ± 1%   21.84n ± ∞ ¹   -1.64% (p=0.009 n=6+5)
-Index_ExtractTrigrams_Medium-32                          46.87n ± 5%   44.09n ± ∞ ¹   -5.93% (p=0.004 n=6+5)
-Index_ExtractTrigrams_Long-32                            127.0n ± 1%   115.6n ± ∞ ¹   -8.94% (p=0.004 n=6+5)
-Index_Search_Prefix-32                                   161.0n ± 4%   108.8n ± ∞ ¹  -32.40% (p=0.004 n=6+5)
-Index_Search_Fuzzy-32                                    916.6n ± 1%   832.0n ± ∞ ¹   -9.23% (p=0.004 n=6+5)
-Index_Search_Exact-32                                    2.030µ ± 2%   1.562µ ± ∞ ¹  -23.04% (n=6+5)
-Index_Search_ShortQuery-32                             944.500µ ± 3%   9.495µ ± ∞ ¹  -98.99% (p=0.004 n=6+5)
-Index_SearchCategories-32                                877.9n ± 2%   738.7n ± ∞ ¹  -15.86% (p=0.004 n=6+5)
-Ranking_CombinedScore-32                                 700.4n ± 0%   702.8n ± ∞ ¹        ~ (p=0.139 n=6+5)
-Ranking_CombinedScore_NoSelections-32                    42.69n ± 1%   43.45n ± ∞ ¹        ~ (p=0.126 n=6+5)
-Engine_Search_Prefix3Char-32                            1125.5n ± 2%   863.1n ± ∞ ¹  -23.31% (p=0.004 n=6+5)
-Engine_Search_Fuzzy-32                                   2.694µ ± 2%   2.960µ ± ∞ ¹   +9.87% (p=0.004 n=6+5)
-Engine_Search_CachedPrefix-32                            13.14n ± 1%   12.70n ± ∞ ¹   -3.39% (n=6+5)
-Engine_Search_CategoryFallback-32                        16.12n ± 1%   15.71n ± ∞ ¹   -2.54% (p=0.004 n=6+5)
-Engine_Search_BloomReject-32                             1.336µ ± 4%   1.314µ ± ∞ ¹   -1.65% (p=0.004 n=6+5)
-Engine_Search_WithPopularity-32                          5.625µ ± 2%   5.270µ ± ∞ ¹   -6.31% (p=0.004 n=6+5)
-HTTPServer_Search_ColdCache-32                           43.90µ ± 1%   46.25µ ± ∞ ¹   +5.35% (p=0.004 n=6+5)
-HTTPServer_Search_WarmCache-32                           2.328µ ± 2%   2.375µ ± ∞ ¹   +2.04% (p=0.026 n=6+5)
-HTTPServer_Select-32                                     12.24µ ± 2%   12.29µ ± ∞ ¹        ~ (p=0.662 n=6+5)
-Component_EngineShortQuery-32                                          13.06n ± ∞ ¹
-Component_EnginePrefixBoost-32                                         4.220µ ± ∞ ¹
-Component_EngineBM25Path-32                                            3.832µ ± ∞ ¹
-Component_EngineJaccardFallback-32                                     2.963µ ± ∞ ¹
-geomean                                                  473.4n        413.5n        -24.51%
+                                      │ docs/benchmarks/bench-prev.txt │  docs/benchmarks/bench-latest.txt   │
+                                      │             sec/op             │    sec/op     vs base               │
+HTTPServer_Search_ColdCache-32                            6.672µ ± ∞ ¹   6.632µ ± ∞ ¹        ~ (p=0.278 n=5)
+HTTPServer_Search_WarmCache-32                            2.402µ ± ∞ ¹   2.335µ ± ∞ ¹   -2.79% (p=0.032 n=5)
+HTTPServer_Select-32                                      2.291µ ± ∞ ¹   2.270µ ± ∞ ¹        ~ (p=0.063 n=5)
+Engine_Search_Prefix3Char-32                              223.0n ± ∞ ¹   306.6n ± ∞ ¹  +37.49% (p=0.008 n=5)
+Engine_Search_Fuzzy-32                                    1.704µ ± ∞ ¹   1.466µ ± ∞ ¹  -13.97% (p=0.008 n=5)
+Engine_Search_CachedPrefix-32                             12.07n ± ∞ ¹   12.32n ± ∞ ¹        ~ (p=0.421 n=5)
+Engine_Search_CategoryFallback-32                         19.75n ± ∞ ¹   19.87n ± ∞ ¹        ~ (p=0.127 n=5)
+Engine_Search_BloomReject-32                              501.3n ± ∞ ¹   464.0n ± ∞ ¹   -7.44% (p=0.008 n=5)
+Engine_Search_WithPopularity-32                           2.440µ ± ∞ ¹   2.324µ ± ∞ ¹   -4.75% (p=0.008 n=5)
+Component_EngineShortQuery-32                             12.19n ± ∞ ¹   12.29n ± ∞ ¹        ~ (p=0.302 n=5)
+Component_EnginePrefixBoost-32                            2.543µ ± ∞ ¹   2.535µ ± ∞ ¹        ~ (p=0.452 n=5)
+Component_EngineBM25Path-32                               2.428µ ± ∞ ¹   2.306µ ± ∞ ¹   -5.02% (p=0.008 n=5)
+Component_EngineJaccardFallback-32                        1.686µ ± ∞ ¹   1.471µ ± ∞ ¹  -12.75% (p=0.008 n=5)
+Bloom_MayContain-32                                       6.245n ± ∞ ¹   6.271n ± ∞ ¹        ~ (p=0.151 n=5)
+Bloom_Miss-32                                             4.235n ± ∞ ¹   4.248n ± ∞ ¹        ~ (p=0.635 n=5)
+Index_ExtractTrigrams_Short-32                            22.02n ± ∞ ¹   21.81n ± ∞ ¹        ~ (p=0.595 n=5)
+Index_ExtractTrigrams_Medium-32                           47.09n ± ∞ ¹   46.52n ± ∞ ¹        ~ (p=0.222 n=5)
+Index_ExtractTrigrams_Long-32                             128.2n ± ∞ ¹   126.0n ± ∞ ¹        ~ (p=0.222 n=5)
+Index_Search_Prefix-32                                    71.52n ± ∞ ¹   70.72n ± ∞ ¹        ~ (p=0.095 n=5)
+Index_Search_Fuzzy-32                                     537.0n ± ∞ ¹   593.3n ± ∞ ¹  +10.48% (p=0.008 n=5)
+Index_Search_Exact-32                                     1.153µ ± ∞ ¹   1.355µ ± ∞ ¹  +17.52% (p=0.008 n=5)
+Index_Search_ShortQuery-32                                9.543µ ± ∞ ¹   8.973µ ± ∞ ¹   -5.97% (p=0.008 n=5)
+Index_SearchCategories-32                                 701.9n ± ∞ ¹   314.0n ± ∞ ¹  -55.26% (p=0.008 n=5)
+Index_BestCategory-32                                     282.5n ± ∞ ¹   260.9n ± ∞ ¹   -7.65% (p=0.008 n=5)
+Ranking_CombinedScore-32                                  3.833n ± ∞ ¹   3.874n ± ∞ ¹   +1.07% (p=0.032 n=5)
+Ranking_CombinedScore_NoSelections-32                     3.832n ± ∞ ¹   3.855n ± ∞ ¹        ~ (p=0.222 n=5)
+Ranking_Scorer-32                                         26.20n ± ∞ ¹   26.09n ± ∞ ¹        ~ (p=0.175 n=5)
+Parallel_EngineSearch-32                                  156.9n ± ∞ ¹   148.4n ± ∞ ¹   -5.42% (p=0.008 n=5)
+Parallel_HTTPSearch-32                                    1.320µ ± ∞ ¹   1.316µ ± ∞ ¹        ~ (p=0.302 n=5)
+Parallel_SearchWithSelections-32                          13.51µ ± ∞ ¹   12.77µ ± ∞ ¹        ~ (p=0.095 n=5)
+geomean                                                   236.5n         228.8n         -3.24%
 ¹ need >= 6 samples for confidence interval at level 0.95
 
-                                      │ docs/benchmarks/baseline.txt │     docs/benchmarks/bench-latest.txt      │
-                                      │             B/op             │     B/op       vs base                    │
-Bloom_MayContain-32                                     0.000 ± 0%       0.000 ± ∞ ¹         ~ (p=1.000 n=6+5) ²
-Bloom_Miss-32                                           0.000 ± 0%       0.000 ± ∞ ¹         ~ (p=1.000 n=6+5) ²
-Index_ExtractTrigrams_Short-32                          16.00 ± 0%       16.00 ± ∞ ¹         ~ (p=1.000 n=6+5) ²
-Index_ExtractTrigrams_Medium-32                         112.0 ± 0%       112.0 ± ∞ ¹         ~ (p=1.000 n=6+5) ²
-Index_ExtractTrigrams_Long-32                           448.0 ± 0%       448.0 ± ∞ ¹         ~ (p=1.000 n=6+5) ²
-Index_Search_Prefix-32                                  48.00 ± 0%       16.00 ± ∞ ¹   -66.67% (n=6+5)
-Index_Search_Fuzzy-32                                  1258.0 ± 0%       760.0 ± ∞ ¹   -39.59% (n=6+5)
-Index_Search_Exact-32                                 1.463Ki ± 0%     1.290Ki ± ∞ ¹   -11.82% (n=6+5)
-Index_Search_ShortQuery-32                           368.09Ki ± 0%     49.19Ki ± ∞ ¹   -86.64% (n=6+5)
-Index_SearchCategories-32                               72.00 ± 0%       72.00 ± ∞ ¹         ~ (p=1.000 n=6+5) ²
-Ranking_CombinedScore-32                                0.000 ± 0%       0.000 ± ∞ ¹         ~ (p=1.000 n=6+5) ²
-Ranking_CombinedScore_NoSelections-32                   0.000 ± 0%       0.000 ± ∞ ¹         ~ (p=1.000 n=6+5) ²
-Engine_Search_Prefix3Char-32                            481.0 ± 0%      1346.0 ± ∞ ¹  +179.83% (p=0.004 n=6+5)
-Engine_Search_Fuzzy-32                                1.496Ki ± 0%     2.483Ki ± ∞ ¹   +65.99% (p=0.004 n=6+5)
-Engine_Search_CachedPrefix-32                           0.000 ± 0%       0.000 ± ∞ ¹         ~ (p=1.000 n=6+5) ²
-Engine_Search_CategoryFallback-32                       0.000 ± 0%       0.000 ± ∞ ¹         ~ (p=1.000 n=6+5) ²
-Engine_Search_BloomReject-32                            208.0 ± 0%      1442.0 ± ∞ ¹  +593.27% (p=0.004 n=6+5)
-Engine_Search_WithPopularity-32                       2.860Ki ± 0%     3.229Ki ± ∞ ¹   +12.87% (p=0.004 n=6+5)
-HTTPServer_Search_ColdCache-32                        126.7Ki ± 0%     125.1Ki ± ∞ ¹    -1.24% (p=0.004 n=6+5)
-HTTPServer_Search_WarmCache-32                        9.020Ki ± 0%     9.020Ki ± ∞ ¹         ~ (p=1.000 n=6+5) ²
-HTTPServer_Select-32                                  102.8Ki ± 0%     102.8Ki ± ∞ ¹         ~ (p=0.069 n=6+5)
-Component_EngineShortQuery-32                                            0.000 ± ∞ ¹
-Component_EnginePrefixBoost-32                                         3.848Ki ± ∞ ¹
-Component_EngineBM25Path-32                                            3.062Ki ± ∞ ¹
-Component_EngineJaccardFallback-32                                     2.483Ki ± ∞ ¹
-geomean                                                            ³                    -0.76%                 ³
+                                      │ docs/benchmarks/bench-prev.txt │    docs/benchmarks/bench-latest.txt    │
+                                      │              B/op              │     B/op       vs base                 │
+HTTPServer_Search_ColdCache-32                           13.63Ki ± ∞ ¹   13.63Ki ± ∞ ¹        ~ (p=0.468 n=5)
+HTTPServer_Search_WarmCache-32                           9.021Ki ± ∞ ¹   9.021Ki ± ∞ ¹        ~ (p=1.000 n=5) ²
+HTTPServer_Select-32                                     6.692Ki ± ∞ ¹   6.690Ki ± ∞ ¹        ~ (p=0.143 n=5)
+Engine_Search_Prefix3Char-32                               0.000 ± ∞ ¹     0.000 ± ∞ ¹        ~ (p=1.000 n=5) ²
+Engine_Search_Fuzzy-32                                    1313.0 ± ∞ ¹     160.0 ± ∞ ¹  -87.81% (p=0.008 n=5)
+Engine_Search_CachedPrefix-32                              0.000 ± ∞ ¹     0.000 ± ∞ ¹        ~ (p=1.000 n=5) ²
+Engine_Search_CategoryFallback-32                          0.000 ± ∞ ¹     0.000 ± ∞ ¹        ~ (p=1.000 n=5) ²
+Engine_Search_BloomReject-32                               0.000 ± ∞ ¹     0.000 ± ∞ ¹        ~ (p=1.000 n=5) ²
+Engine_Search_WithPopularity-32                           1314.0 ± ∞ ¹     160.0 ± ∞ ¹  -87.82% (p=0.008 n=5)
+Component_EngineShortQuery-32                              0.000 ± ∞ ¹     0.000 ± ∞ ¹        ~ (p=1.000 n=5) ²
+Component_EnginePrefixBoost-32                           1.970Ki ± ∞ ¹   1.970Ki ± ∞ ¹        ~ (p=1.000 n=5) ²
+Component_EngineBM25Path-32                               1313.0 ± ∞ ¹     160.0 ± ∞ ¹  -87.81% (p=0.008 n=5)
+Component_EngineJaccardFallback-32                        1313.0 ± ∞ ¹     160.0 ± ∞ ¹  -87.81% (p=0.008 n=5)
+Bloom_MayContain-32                                        0.000 ± ∞ ¹     0.000 ± ∞ ¹        ~ (p=1.000 n=5) ²
+Bloom_Miss-32                                              0.000 ± ∞ ¹     0.000 ± ∞ ¹        ~ (p=1.000 n=5) ²
+Index_ExtractTrigrams_Short-32                             16.00 ± ∞ ¹     16.00 ± ∞ ¹        ~ (p=1.000 n=5) ²
+Index_ExtractTrigrams_Medium-32                            112.0 ± ∞ ¹     112.0 ± ∞ ¹        ~ (p=1.000 n=5) ²
+Index_ExtractTrigrams_Long-32                              448.0 ± ∞ ¹     448.0 ± ∞ ¹        ~ (p=1.000 n=5) ²
+Index_Search_Prefix-32                                     0.000 ± ∞ ¹     0.000 ± ∞ ¹        ~ (p=1.000 n=5) ²
+Index_Search_Fuzzy-32                                      16.00 ± ∞ ¹     16.00 ± ∞ ¹        ~ (p=1.000 n=5) ²
+Index_Search_Exact-32                                      16.00 ± ∞ ¹     16.00 ± ∞ ¹        ~ (p=1.000 n=5) ²
+Index_Search_ShortQuery-32                               49.19Ki ± ∞ ¹   49.19Ki ± ∞ ¹        ~ (p=1.000 n=5) ²
+Index_SearchCategories-32                                  40.00 ± ∞ ¹     40.00 ± ∞ ¹        ~ (p=1.000 n=5) ²
+Index_BestCategory-32                                      0.000 ± ∞ ¹     0.000 ± ∞ ¹        ~ (p=1.000 n=5) ²
+Ranking_CombinedScore-32                                   0.000 ± ∞ ¹     0.000 ± ∞ ¹        ~ (p=1.000 n=5) ²
+Ranking_CombinedScore_NoSelections-32                      0.000 ± ∞ ¹     0.000 ± ∞ ¹        ~ (p=1.000 n=5) ²
+Ranking_Scorer-32                                          48.00 ± ∞ ¹     48.00 ± ∞ ¹        ~ (p=1.000 n=5) ²
+Parallel_EngineSearch-32                                   668.0 ± ∞ ¹     437.0 ± ∞ ¹  -34.58% (p=0.008 n=5)
+Parallel_HTTPSearch-32                                   9.021Ki ± ∞ ¹   9.021Ki ± ∞ ¹        ~ (p=0.444 n=5)
+Parallel_SearchWithSelections-32                         6.694Ki ± ∞ ¹   5.596Ki ± ∞ ¹  -16.41% (p=0.008 n=5)
+geomean                                                              ³                  -25.98%               ³
 ¹ need >= 6 samples for confidence interval at level 0.95
 ² all samples are equal
 ³ summaries must be >0 to compute geomean
 
-                                      │ docs/benchmarks/baseline.txt │    docs/benchmarks/bench-latest.txt    │
-                                      │          allocs/op           │  allocs/op   vs base                   │
-Bloom_MayContain-32                                     0.000 ± 0%     0.000 ± ∞ ¹        ~ (p=1.000 n=6+5) ²
-Bloom_Miss-32                                           0.000 ± 0%     0.000 ± ∞ ¹        ~ (p=1.000 n=6+5) ²
-Index_ExtractTrigrams_Short-32                          1.000 ± 0%     1.000 ± ∞ ¹        ~ (p=1.000 n=6+5) ²
-Index_ExtractTrigrams_Medium-32                         1.000 ± 0%     1.000 ± ∞ ¹        ~ (p=1.000 n=6+5) ²
-Index_ExtractTrigrams_Long-32                           1.000 ± 0%     1.000 ± ∞ ¹        ~ (p=1.000 n=6+5) ²
-Index_Search_Prefix-32                                  2.000 ± 0%     1.000 ± ∞ ¹  -50.00% (n=6+5)
-Index_Search_Fuzzy-32                                   9.000 ± 0%     9.000 ± ∞ ¹        ~ (p=1.000 n=6+5) ²
-Index_Search_Exact-32                                   11.00 ± 0%     10.00 ± ∞ ¹   -9.09% (n=6+5)
-Index_Search_ShortQuery-32                           10045.00 ± 0%     10.00 ± ∞ ¹  -99.90% (n=6+5)
-Index_SearchCategories-32                               3.000 ± 0%     3.000 ± ∞ ¹        ~ (p=1.000 n=6+5) ²
-Ranking_CombinedScore-32                                0.000 ± 0%     0.000 ± ∞ ¹        ~ (p=1.000 n=6+5) ²
-Ranking_CombinedScore_NoSelections-32                   0.000 ± 0%     0.000 ± ∞ ¹        ~ (p=1.000 n=6+5) ²
-Engine_Search_Prefix3Char-32                            8.000 ± 0%     5.000 ± ∞ ¹  -37.50% (n=6+5)
-Engine_Search_Fuzzy-32                                  13.00 ± 0%     19.00 ± ∞ ¹  +46.15% (p=0.004 n=6+5)
-Engine_Search_CachedPrefix-32                           0.000 ± 0%     0.000 ± ∞ ¹        ~ (p=1.000 n=6+5) ²
-Engine_Search_CategoryFallback-32                       0.000 ± 0%     0.000 ± ∞ ¹        ~ (p=1.000 n=6+5) ²
-Engine_Search_BloomReject-32                            4.000 ± 0%     5.000 ± ∞ ¹  +25.00% (p=0.004 n=6+5)
-Engine_Search_WithPopularity-32                         18.00 ± 0%     21.00 ± ∞ ¹  +16.67% (p=0.004 n=6+5)
-HTTPServer_Search_ColdCache-32                          257.0 ± 0%     312.0 ± ∞ ¹  +21.40% (p=0.004 n=6+5)
-HTTPServer_Search_WarmCache-32                          24.00 ± 0%     24.00 ± ∞ ¹        ~ (p=1.000 n=6+5) ²
-HTTPServer_Select-32                                    31.00 ± 0%     31.00 ± ∞ ¹        ~ (p=1.000 n=6+5) ²
-Component_EngineShortQuery-32                                          0.000 ± ∞ ¹
-Component_EnginePrefixBoost-32                                         65.00 ± ∞ ¹
-Component_EngineBM25Path-32                                            20.00 ± ∞ ¹
-Component_EngineJaccardFallback-32                                     19.00 ± ∞ ¹
-geomean                                                            ³                -29.09%                 ³
+                                      │ docs/benchmarks/bench-prev.txt │  docs/benchmarks/bench-latest.txt   │
+                                      │           allocs/op            │  allocs/op   vs base                │
+HTTPServer_Search_ColdCache-32                             38.00 ± ∞ ¹   38.00 ± ∞ ¹       ~ (p=1.000 n=5) ²
+HTTPServer_Search_WarmCache-32                             24.00 ± ∞ ¹   24.00 ± ∞ ¹       ~ (p=1.000 n=5) ²
+HTTPServer_Select-32                                       25.00 ± ∞ ¹   25.00 ± ∞ ¹       ~ (p=1.000 n=5) ²
+Engine_Search_Prefix3Char-32                               0.000 ± ∞ ¹   0.000 ± ∞ ¹       ~ (p=1.000 n=5) ²
+Engine_Search_Fuzzy-32                                     3.000 ± ∞ ¹   3.000 ± ∞ ¹       ~ (p=1.000 n=5) ²
+Engine_Search_CachedPrefix-32                              0.000 ± ∞ ¹   0.000 ± ∞ ¹       ~ (p=1.000 n=5) ²
+Engine_Search_CategoryFallback-32                          0.000 ± ∞ ¹   0.000 ± ∞ ¹       ~ (p=1.000 n=5) ²
+Engine_Search_BloomReject-32                               0.000 ± ∞ ¹   0.000 ± ∞ ¹       ~ (p=1.000 n=5) ²
+Engine_Search_WithPopularity-32                            3.000 ± ∞ ¹   3.000 ± ∞ ¹       ~ (p=1.000 n=5) ²
+Component_EngineShortQuery-32                              0.000 ± ∞ ¹   0.000 ± ∞ ¹       ~ (p=1.000 n=5) ²
+Component_EnginePrefixBoost-32                             13.00 ± ∞ ¹   13.00 ± ∞ ¹       ~ (p=1.000 n=5) ²
+Component_EngineBM25Path-32                                3.000 ± ∞ ¹   3.000 ± ∞ ¹       ~ (p=1.000 n=5) ²
+Component_EngineJaccardFallback-32                         3.000 ± ∞ ¹   3.000 ± ∞ ¹       ~ (p=1.000 n=5) ²
+Bloom_MayContain-32                                        0.000 ± ∞ ¹   0.000 ± ∞ ¹       ~ (p=1.000 n=5) ²
+Bloom_Miss-32                                              0.000 ± ∞ ¹   0.000 ± ∞ ¹       ~ (p=1.000 n=5) ²
+Index_ExtractTrigrams_Short-32                             1.000 ± ∞ ¹   1.000 ± ∞ ¹       ~ (p=1.000 n=5) ²
+Index_ExtractTrigrams_Medium-32                            1.000 ± ∞ ¹   1.000 ± ∞ ¹       ~ (p=1.000 n=5) ²
+Index_ExtractTrigrams_Long-32                              1.000 ± ∞ ¹   1.000 ± ∞ ¹       ~ (p=1.000 n=5) ²
+Index_Search_Prefix-32                                     0.000 ± ∞ ¹   0.000 ± ∞ ¹       ~ (p=1.000 n=5) ²
+Index_Search_Fuzzy-32                                      1.000 ± ∞ ¹   1.000 ± ∞ ¹       ~ (p=1.000 n=5) ²
+Index_Search_Exact-32                                      1.000 ± ∞ ¹   1.000 ± ∞ ¹       ~ (p=1.000 n=5) ²
+Index_Search_ShortQuery-32                                 10.00 ± ∞ ¹   10.00 ± ∞ ¹       ~ (p=1.000 n=5) ²
+Index_SearchCategories-32                                  2.000 ± ∞ ¹   2.000 ± ∞ ¹       ~ (p=1.000 n=5) ²
+Index_BestCategory-32                                      0.000 ± ∞ ¹   0.000 ± ∞ ¹       ~ (p=1.000 n=5) ²
+Ranking_CombinedScore-32                                   0.000 ± ∞ ¹   0.000 ± ∞ ¹       ~ (p=1.000 n=5) ²
+Ranking_CombinedScore_NoSelections-32                      0.000 ± ∞ ¹   0.000 ± ∞ ¹       ~ (p=1.000 n=5) ²
+Ranking_Scorer-32                                          1.000 ± ∞ ¹   1.000 ± ∞ ¹       ~ (p=1.000 n=5) ²
+Parallel_EngineSearch-32                                   3.000 ± ∞ ¹   3.000 ± ∞ ¹       ~ (p=1.000 n=5) ²
+Parallel_HTTPSearch-32                                     24.00 ± ∞ ¹   24.00 ± ∞ ¹       ~ (p=1.000 n=5) ²
+Parallel_SearchWithSelections-32                           3.000 ± ∞ ¹   3.000 ± ∞ ¹       ~ (p=1.000 n=5) ²
+geomean                                                              ³                +0.00%               ³
 ¹ need >= 6 samples for confidence interval at level 0.95
 ² all samples are equal
 ³ summaries must be >0 to compute geomean

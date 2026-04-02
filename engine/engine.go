@@ -251,6 +251,9 @@ func (e *Engine) searchInternal(query string) []Result {
 		return results
 	}
 
+	slices.Sort(trigrams)
+	trigrams = slices.Compact(trigrams)
+
 	// Bloom pre-check: if no trigrams pass, skip BM25 and Jaccard entirely.
 	// Only category fallback is possible (reusing pre-extracted trigrams).
 	anyPass := false
@@ -284,16 +287,17 @@ func (e *Engine) searchInternal(query string) []Result {
 		}
 	}
 
-	results := make([]Result, 0, maxResults)
+	var topKBuf [maxResults]candidate
+	cands := topKBuf[:0]
+
 	for _, sr := range searchResults {
 		if sr.ProductID < 0 || sr.ProductID >= len(e.products) {
 			continue
 		}
-		results = pushTopResult(results, Result{
-			Product:   &e.products[sr.ProductID],
-			ProductID: sr.ProductID,
-			Score:     score.Score(sr.ProductID, sr.Score),
-			MatchType: MatchDirect,
+		cands = pushCandidate(cands, candidate{
+			id:    sr.ProductID,
+			score: score.Score(sr.ProductID, sr.Score),
+			match: MatchDirect,
 		})
 	}
 
@@ -308,16 +312,36 @@ func (e *Engine) searchInternal(query string) []Result {
 					if _, ok := seen[r.ProductID]; ok {
 						continue
 					}
-					results = pushTopResult(results, r)
+					cands = pushCandidate(cands, candidate{
+						id:    r.ProductID,
+						score: r.Score,
+						match: r.MatchType,
+					})
 				}
 			}
 		}
 	}
 
-	if len(results) == 0 {
+	if len(cands) == 0 {
 		return nil
 	}
-	sortTopResults(results)
+
+	slices.SortFunc(cands, func(a, b candidate) int {
+		if a.score != b.score {
+			return cmp.Compare(b.score, a.score)
+		}
+		return cmp.Compare(a.id, b.id)
+	})
+
+	results := make([]Result, len(cands))
+	for i, c := range cands {
+		results[i] = Result{
+			Product:   &e.products[c.id],
+			ProductID: c.id,
+			Score:     c.score,
+			MatchType: c.match,
+		}
+	}
 
 	// Compute highlights only for final top-K results.
 	e.addHighlights(results, query)
@@ -693,6 +717,57 @@ func forEachQueryWord(query string, yield func(word string)) {
 			start = -1
 		}
 	}
+}
+
+type candidate struct {
+	id    int
+	score float64
+	match MatchType
+}
+
+func lessCandidate(a, b candidate) bool {
+	if a.score != b.score {
+		return a.score < b.score
+	}
+	return a.id > b.id
+}
+
+func siftDownCandidates(h []candidate, root int) {
+	for {
+		child := 2*root + 1
+		if child >= len(h) {
+			return
+		}
+		if child+1 < len(h) && lessCandidate(h[child+1], h[child]) {
+			child++
+		}
+		if !lessCandidate(h[child], h[root]) {
+			return
+		}
+		h[root], h[child] = h[child], h[root]
+		root = child
+	}
+}
+
+func pushCandidate(h []candidate, c candidate) []candidate {
+	if len(h) < maxResults {
+		h = append(h, c)
+		for i := len(h) - 1; i > 0; {
+			parent := (i - 1) / 2
+			if !lessCandidate(h[i], h[parent]) {
+				break
+			}
+			h[i], h[parent] = h[parent], h[i]
+			i = parent
+		}
+		return h
+	}
+	if !lessCandidate(h[0], c) {
+		return h
+	}
+	h[0] = c
+	siftDownCandidates(h, 0)
+	return h
 }
 
 func lessResult(a, b Result) bool {

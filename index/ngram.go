@@ -89,7 +89,7 @@ type Index struct {
 	products      []catalog.Product
 	posting       map[string][]int               // trigram → product IDs
 	docGramCounts []int                          // product ID → unique trigram count
-	catTrigrams   map[string]map[string]struct{} // category → its trigram set
+	catTrigrams   map[string][]string            // category → sorted trigrams
 	catProducts   map[string][]int               // category → product IDs
 	sortedNames   []nameEntry                    // sorted by lowercased name for binary search
 	hitsPool      sync.Pool                      // reusable []uint8 hit counters
@@ -109,7 +109,7 @@ type Snapshot struct {
 func (idx *Index) ToSnapshot() Snapshot {
 	catTris := make(map[string][]string, len(idx.catTrigrams))
 	for cat, grams := range idx.catTrigrams {
-		catTris[cat] = slices.Collect(maps.Keys(grams))
+		catTris[cat] = slices.Clone(grams)
 	}
 
 	return Snapshot{
@@ -123,13 +123,12 @@ func (idx *Index) ToSnapshot() Snapshot {
 
 // FromSnapshot restores an [Index] from a serialized [Snapshot] and product list.
 func FromSnapshot(s Snapshot, products []catalog.Product) *Index {
-	catTrigrams := make(map[string]map[string]struct{}, len(s.CatTrigrams))
+	catTrigrams := make(map[string][]string, len(s.CatTrigrams))
 	for cat, grams := range s.CatTrigrams {
-		m := make(map[string]struct{}, len(grams))
-		for _, g := range grams {
-			m[g] = struct{}{}
-		}
-		catTrigrams[cat] = m
+		sorted := make([]string, len(grams))
+		copy(sorted, grams)
+		slices.Sort(sorted)
+		catTrigrams[cat] = slices.Compact(sorted)
 	}
 
 	n := len(products)
@@ -165,7 +164,7 @@ func NewIndex(products []catalog.Product) *Index {
 		products:      products,
 		posting:       make(map[string][]int),
 		docGramCounts: make([]int, n),
-		catTrigrams:   make(map[string]map[string]struct{}),
+		catTrigrams:   make(map[string][]string),
 		catProducts:   make(map[string][]int),
 		hitsPool:      sync.Pool{New: func() any { s := make([]uint8, n); return &s }},
 	}
@@ -188,10 +187,8 @@ func NewIndex(products []catalog.Product) *Index {
 
 	for cat := range idx.catProducts {
 		grams := ExtractTrigrams(cat)
-		idx.catTrigrams[cat] = make(map[string]struct{}, len(grams))
-		for _, g := range grams {
-			idx.catTrigrams[cat][g] = struct{}{}
-		}
+		slices.Sort(grams)
+		idx.catTrigrams[cat] = slices.Compact(grams)
 	}
 
 	idx.sortedNames = make([]nameEntry, n)
@@ -220,11 +217,13 @@ func (idx *Index) Search(query string) []SearchResult {
 	if len(queryGrams) == 0 {
 		return nil
 	}
+	slices.Sort(queryGrams)
+	queryGrams = slices.Compact(queryGrams)
 	return idx.searchWithGrams(queryGrams)
 }
 
 // SearchWithGrams performs a Jaccard trigram search using pre-extracted trigrams.
-// Use this to avoid redundant ExtractTrigrams calls when trigrams are already available.
+// queryGrams must be pre-sorted and deduplicated for accurate results.
 func (idx *Index) SearchWithGrams(queryGrams []string) []SearchResult {
 	if len(queryGrams) == 0 {
 		return nil
@@ -242,10 +241,8 @@ type gramEntry struct {
 // It processes trigrams from rarest to most common posting list,
 // caps candidates at maxCandidates, and only scores those with enough
 // trigram overlap to avoid wasted work on large catalogs.
+// Assumption: queryGrams is already sorted and deduplicated by the caller.
 func (idx *Index) searchWithGrams(queryGrams []string) []SearchResult {
-	// Deduplicate query trigrams in-place (sort + compact, avoids map alloc).
-	slices.Sort(queryGrams)
-	queryGrams = slices.Compact(queryGrams)
 	numQueryGrams := len(queryGrams)
 
 	// Sort by posting list size (rarest first). Stack-allocate for typical queries.
@@ -362,10 +359,8 @@ func (idx *Index) SearchCategories(query string) []string {
 		return matches
 	}
 
-	querySet := make(map[string]struct{}, len(queryGrams))
-	for _, g := range queryGrams {
-		querySet[g] = struct{}{}
-	}
+	slices.Sort(queryGrams)
+	queryGrams = slices.Compact(queryGrams)
 
 	type scored struct {
 		name  string
@@ -374,16 +369,11 @@ func (idx *Index) SearchCategories(query string) []string {
 	var results []scored
 
 	for cat, catGrams := range idx.catTrigrams {
-		intersection := 0
-		for g := range querySet {
-			if _, ok := catGrams[g]; ok {
-				intersection++
-			}
-		}
+		intersection := countIntersection(queryGrams, catGrams)
 		if intersection == 0 {
 			continue
 		}
-		unionSize := len(querySet) + len(catGrams) - intersection
+		unionSize := len(queryGrams) + len(catGrams) - intersection
 		results = append(results, scored{
 			name:  cat,
 			score: float64(intersection) / float64(unionSize),
@@ -438,12 +428,7 @@ func (idx *Index) bestCategoryWithGrams(queryGrams []string) string {
 	numQueryGrams := len(queryGrams)
 
 	for cat, catGrams := range idx.catTrigrams {
-		intersection := 0
-		for _, g := range queryGrams {
-			if _, ok := catGrams[g]; ok {
-				intersection++
-			}
-		}
+		intersection := countIntersection(queryGrams, catGrams)
 		if intersection == 0 {
 			continue
 		}
@@ -455,6 +440,22 @@ func (idx *Index) bestCategoryWithGrams(queryGrams []string) string {
 		}
 	}
 	return bestName
+}
+
+func countIntersection(sortedA, sortedB []string) int {
+	i, j, count := 0, 0, 0
+	for i < len(sortedA) && j < len(sortedB) {
+		if sortedA[i] == sortedB[j] {
+			count++
+			i++
+			j++
+		} else if sortedA[i] < sortedB[j] {
+			i++
+		} else {
+			j++
+		}
+	}
+	return count
 }
 
 // ProductsByCategory returns the product IDs belonging to the given category.
