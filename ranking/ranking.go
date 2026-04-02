@@ -5,8 +5,8 @@
 // both frequency (more selections = higher sum) and recency (older selections
 // contribute less).
 //
-// The [Ranker.Scorer] method returns a closure that captures a single time.Now()
-// and lock acquisition for an entire search operation, avoiding per-result overhead.
+// The [Ranker.ScoreView] method returns a lightweight immutable scorer for a
+// single search operation, avoiding repeated lock work on the hot path.
 package ranking
 
 import (
@@ -33,6 +33,13 @@ type Ranker struct {
 
 type popularitySnapshot struct {
 	scores []float64 // indexed by product ID, normalized to 0.0-1.0
+}
+
+// ScoreView is an immutable view of the current popularity snapshot.
+// It is cheap to copy and safe to use concurrently.
+type ScoreView struct {
+	scores []float64
+	alpha  float64
 }
 
 // New creates a Ranker with the given decay rate, alpha, and product count.
@@ -145,6 +152,20 @@ func (s popularitySnapshot) score(productID int) float64 {
 	return s.scores[productID]
 }
 
+// Popularity returns the normalized popularity score for productID.
+func (s ScoreView) Popularity(productID int) float64 {
+	if productID < 0 || productID >= len(s.scores) {
+		return 0
+	}
+	return s.scores[productID]
+}
+
+// Score blends relevance with popularity using the ranker's configured alpha.
+func (s ScoreView) Score(productID int, relevance float64) float64 {
+	pop := s.Popularity(productID)
+	return s.alpha*relevance + (1-s.alpha)*pop
+}
+
 // PopularityScore computes the raw exponential decay score for a product.
 func (r *Ranker) PopularityScore(productID int) float64 {
 	r.mu.RLock()
@@ -156,30 +177,29 @@ func (r *Ranker) PopularityScore(productID int) float64 {
 // by dividing by the maximum popularity score across all products.
 // The max is cached and only recomputed when selections change.
 func (r *Ranker) NormalizedPopularity(productID int) float64 {
-	snapshot, _ := r.snapshotView()
-	return snapshot.score(productID)
+	return r.ScoreView().Popularity(productID)
 }
 
 // CombinedScore computes the final ranking score by fusing relevance and popularity.
 // relevance should be in the 0.0-1.0 range (Jaccard similarity).
 func (r *Ranker) CombinedScore(productID int, relevance float64) float64 {
-	pop := r.NormalizedPopularity(productID)
-	return r.alpha*relevance + (1-r.alpha)*pop
+	return r.ScoreView().Score(productID, relevance)
 }
 
-// Scorer returns a reusable scoring function that captures a single time.Now()
-// and a snapshot of the current popularity state. Call this once per search,
-// then use the returned function to score each result — avoids repeated
-// time.Now() and lock overhead per product.
-//
-// The snapshot is a pre-computed map of product ID to raw decay score, taken
-// under the lock, so the returned closure is safe for concurrent use.
-func (r *Ranker) Scorer() func(productID int, relevance float64) float64 {
+// ScoreView returns an immutable scorer for the current popularity snapshot.
+func (r *Ranker) ScoreView() ScoreView {
 	snapshot, alpha := r.snapshotView()
+	return ScoreView{
+		scores: snapshot.scores,
+		alpha:  alpha,
+	}
+}
 
+// Scorer returns the legacy closure-based scoring API.
+func (r *Ranker) Scorer() func(productID int, relevance float64) float64 {
+	view := r.ScoreView()
 	return func(productID int, relevance float64) float64 {
-		pop := snapshot.score(productID)
-		return alpha*relevance + (1-alpha)*pop
+		return view.Score(productID, relevance)
 	}
 }
 

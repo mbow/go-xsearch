@@ -91,6 +91,29 @@ func TestSearchFuzzyMatch(t *testing.T) {
 	}
 }
 
+func TestSearchFuzzyFallbackDeduplicatesProducts(t *testing.T) {
+	t.Parallel()
+	e := New([]catalog.Product{
+		{Name: "Budweiser", Category: "beer"},
+		{Name: "Bud Light", Category: "beer"},
+		{Name: "Miller Lite", Category: "beer"},
+		{Name: "Coors Light", Category: "beer"},
+	})
+
+	results := e.Search("budwiser")
+	if len(results) == 0 {
+		t.Fatal("expected results for 'budwiser'")
+	}
+
+	seen := make(map[int]struct{}, len(results))
+	for _, r := range results {
+		if _, ok := seen[r.ProductID]; ok {
+			t.Fatalf("expected deduplicated fallback results, found duplicate product %d", r.ProductID)
+		}
+		seen[r.ProductID] = struct{}{}
+	}
+}
+
 func TestSearchSortedByScore(t *testing.T) {
 	t.Parallel()
 	e := New(testProducts())
@@ -152,7 +175,7 @@ func TestSearchHighlighting(t *testing.T) {
 	}
 
 	first := results[0]
-	if len(first.Highlights) == 0 {
+	if first.HighlightCount == 0 {
 		t.Error("expected highlights on first result")
 	}
 	if first.Highlights[0].Start != 0 {

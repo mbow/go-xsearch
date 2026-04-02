@@ -17,6 +17,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"unicode/utf8"
 
 	"github.com/fxamacker/cbor/v2"
 )
@@ -35,13 +36,16 @@ type Highlight struct {
 	End   int // byte offset (exclusive)
 }
 
+const maxHighlights = 4
+
 // Result is a single search result with metadata.
 type Result struct {
 	Product         catalog.Product
 	ProductID       int
 	Score           float64
 	MatchType       MatchType
-	Highlights      []Highlight
+	Highlights      [maxHighlights]Highlight
+	HighlightCount  uint8
 	HighlightedName template.HTML // security: only buildHighlightedName constructs this; all segments are html.EscapeString'd
 }
 
@@ -157,8 +161,7 @@ func NewFromEmbedded(products []catalog.Product, bloomRaw, indexRaw, bm25Raw []b
 // queries since every search starts with 1-2 characters.
 func (e *Engine) buildPrefixCache() {
 	prefixSet := make(map[string]struct{})
-	for _, p := range e.products {
-		name := strings.ToLower(p.Name)
+	for _, name := range e.lowerNames {
 		if len(name) >= 1 {
 			prefixSet[name[:1]] = struct{}{}
 		}
@@ -208,11 +211,10 @@ func (e *Engine) buildPrefixCache() {
 
 // Search returns ranked results for the given query.
 func (e *Engine) Search(query string) []Result {
+	query = normalizeQuery(query)
 	if query == "" {
 		return nil
 	}
-
-	query = strings.ToLower(strings.TrimSpace(query))
 
 	// Check prefix cache for 1-2 char queries
 	if len(query) <= 2 {
@@ -222,7 +224,8 @@ func (e *Engine) Search(query string) []Result {
 	}
 
 	// Check if query exactly matches a category name — return precomputed top-N.
-	if cached, ok := e.ensureCategoryCached(query, nil); ok {
+	score := e.ranker.ScoreView()
+	if cached, ok := e.ensureCategoryCached(query, score); ok {
 		return cached
 	}
 
@@ -231,25 +234,19 @@ func (e *Engine) Search(query string) []Result {
 
 // searchInternal performs the full search pipeline.
 func (e *Engine) searchInternal(query string) []Result {
-	// Defer Scorer() allocation until we know we have results to score.
-	var score scorerFunc
-	getScorer := func() scorerFunc {
-		if score == nil {
-			score = e.ranker.Scorer()
-		}
-		return score
-	}
+	score := e.ranker.ScoreView()
 
 	// Extract trigrams once — reused by Bloom check, Jaccard search, and category lookup.
-	trigrams := index.ExtractTrigrams(query)
+	var trigramBuf [16]string
+	trigrams := extractNormalizedTrigrams(trigramBuf[:0], query)
 
 	// Short queries (< 3 chars): no trigrams available, try BM25 then prefix search.
 	if len(trigrams) == 0 {
 		bm25Results := e.bm25idx.Search(query)
 		if len(bm25Results) > 0 {
-			return e.buildBM25Results(bm25Results, getScorer(), query)
+			return e.buildBM25Results(bm25Results, score, query)
 		}
-		results := e.buildResults(e.index.Search(query), MatchDirect, getScorer())
+		results := e.buildResults(e.index.Search(query), MatchDirect, score)
 		e.addHighlights(results, query)
 		return results
 	}
@@ -265,7 +262,7 @@ func (e *Engine) searchInternal(query string) []Result {
 	}
 	if !anyPass {
 		if bestCat, ok := e.index.BestCategoryWithGrams(trigrams); ok {
-			return e.categoryFallback(bestCat, nil, getScorer())
+			return e.categoryFallback(bestCat, nil, score)
 		}
 		return nil
 	}
@@ -273,36 +270,54 @@ func (e *Engine) searchInternal(query string) []Result {
 	// Bloom passed — try BM25 first (primary path for well-formed queries).
 	bm25Results := e.bm25idx.Search(query)
 	if len(bm25Results) > 0 {
-		return e.buildBM25Results(bm25Results, getScorer(), query)
+		return e.buildBM25Results(bm25Results, score, query)
 	}
 
 	// BM25 miss — Jaccard trigram fallback (handles typos/fuzzy).
 	// Passes pre-extracted trigrams to avoid recomputing them.
 	searchResults := e.index.SearchWithGrams(trigrams)
 
-	results := make([]Result, 0, maxResults)
 	goodResults := 0
 	for _, sr := range searchResults {
 		if sr.Score >= fallbackThreshold {
 			goodResults++
 		}
 	}
-	results = append(results, e.buildResults(searchResults, MatchDirect, getScorer())...)
+
+	results := make([]Result, 0, maxResults)
+	for _, sr := range searchResults {
+		if sr.ProductID < 0 || sr.ProductID >= len(e.products) {
+			continue
+		}
+		results = pushTopResult(results, Result{
+			Product:   e.products[sr.ProductID],
+			ProductID: sr.ProductID,
+			Score:     score.Score(sr.ProductID, sr.Score),
+			MatchType: MatchDirect,
+		})
+	}
 
 	if goodResults < minDirectResults {
 		if bestCat, ok := e.index.BestCategoryWithGrams(trigrams); ok {
-			fallbackResults := e.categoryFallback(bestCat, searchResults, getScorer())
-			results = append(results, fallbackResults...)
+			if cached, ok := e.ensureCategoryCached(bestCat, score); ok {
+				seen := make(map[int]struct{}, len(searchResults))
+				for _, sr := range searchResults {
+					seen[sr.ProductID] = struct{}{}
+				}
+				for _, r := range cached {
+					if _, ok := seen[r.ProductID]; ok {
+						continue
+					}
+					results = pushTopResult(results, r)
+				}
+			}
 		}
 	}
 
-	slices.SortFunc(results, func(a, b Result) int {
-		return cmp.Compare(b.Score, a.Score)
-	})
-
-	if len(results) > maxResults {
-		results = results[:maxResults]
+	if len(results) == 0 {
+		return nil
 	}
+	results = drainTopResults(results)
 
 	// Compute highlights only for final top-K results.
 	e.addHighlights(results, query)
@@ -330,67 +345,76 @@ func (e *Engine) Ranker() *ranking.Ranker {
 	return e.ranker
 }
 
-// scorerFunc scores a product given its ID and relevance.
-type scorerFunc func(productID int, relevance float64) float64
-
 // computeHighlights finds byte positions of query matches in the product name.
-// queryWords should be pre-split and lowercased to avoid repeated allocation.
 // query is the full lowercased query string used as a substring fallback.
-func computeHighlights(lowerName string, queryWords []string, query string) []Highlight {
-	// Try to find each query word in the product name.
-	var buf [4]Highlight
-	highlights := buf[:0]
-	for _, word := range queryWords {
-		pos := strings.Index(lowerName, word)
-		if pos >= 0 {
-			highlights = append(highlights, Highlight{Start: pos, End: pos + len(word)})
-		}
-	}
+func computeHighlights(lowerName, query string) ([maxHighlights]Highlight, uint8) {
+	var highlights [maxHighlights]Highlight
+	var count uint8
 
-	// If no word matches, try the full query as a substring.
-	if len(highlights) == 0 {
+	forEachQueryWord(query, func(word string) {
+		pos := strings.Index(lowerName, word)
+		if pos < 0 || count == maxHighlights {
+			return
+		}
+		highlights[count] = Highlight{Start: pos, End: pos + len(word)}
+		count++
+	})
+
+	if count == 0 {
 		pos := strings.Index(lowerName, query)
 		if pos >= 0 {
-			highlights = append(highlights, Highlight{Start: pos, End: pos + len(query)})
+			highlights[0] = Highlight{Start: pos, End: pos + len(query)}
+			return highlights, 1
 		}
+		return highlights, 0
 	}
 
-	// Sort by start position and merge overlaps.
-	slices.SortFunc(highlights, func(a, b Highlight) int {
-		return cmp.Compare(a.Start, b.Start)
-	})
-	return mergeHighlights(highlights)
+	return mergeHighlights(highlights, count)
 }
 
 // mergeHighlights merges overlapping or adjacent highlight ranges.
-func mergeHighlights(hs []Highlight) []Highlight {
-	if len(hs) <= 1 {
-		return hs
+func mergeHighlights(hs [maxHighlights]Highlight, count uint8) ([maxHighlights]Highlight, uint8) {
+	if count <= 1 {
+		return hs, count
 	}
-	var mbuf [4]Highlight
-	mbuf[0] = hs[0]
-	merged := mbuf[:1]
-	for _, h := range hs[1:] {
-		last := &merged[len(merged)-1]
-		if h.Start <= last.End {
-			last.End = max(last.End, h.End)
+
+	sortHighlights(&hs, int(count))
+
+	merged := 1
+	for i := 1; i < int(count); i++ {
+		last := &hs[merged-1]
+		if hs[i].Start <= last.End {
+			last.End = max(last.End, hs[i].End)
 		} else {
-			merged = append(merged, h)
+			hs[merged] = hs[i]
+			merged++
 		}
 	}
-	return merged
+	return hs, uint8(merged)
+}
+
+func sortHighlights(hs *[maxHighlights]Highlight, count int) {
+	for i := 1; i < count; i++ {
+		cur := hs[i]
+		j := i - 1
+		for ; j >= 0 && hs[j].Start > cur.Start; j-- {
+			hs[j+1] = hs[j]
+		}
+		hs[j+1] = cur
+	}
 }
 
 // buildHighlightedName renders product name with <mark> tags around matched portions.
-func buildHighlightedName(name string, highlights []Highlight) template.HTML {
-	if len(highlights) == 0 {
+func buildHighlightedName(name string, highlights [maxHighlights]Highlight, count uint8) template.HTML {
+	if count == 0 {
 		return template.HTML(html.EscapeString(name))
 	}
 
 	var b strings.Builder
-	b.Grow(len(name) + len(highlights)*13) // 13 = len("<mark>") + len("</mark>")
+	b.Grow(len(name) + int(count)*13) // 13 = len("<mark>") + len("</mark>")
 	prev := 0
-	for _, h := range highlights {
+	for i := 0; i < int(count); i++ {
+		h := highlights[i]
 		if h.Start > prev {
 			b.WriteString(html.EscapeString(name[prev:h.Start]))
 		}
@@ -407,7 +431,7 @@ func buildHighlightedName(name string, highlights []Highlight) template.HTML {
 
 // buildBM25Results converts BM25 search results to engine results,
 // normalizing BM25 scores and blending with prefix boost and popularity.
-func (e *Engine) buildBM25Results(bm25Results []bm25.SearchResult, score scorerFunc, query string) []Result {
+func (e *Engine) buildBM25Results(bm25Results []bm25.SearchResult, score ranking.ScoreView, query string) []Result {
 	maxBM25 := 0.0
 	for _, r := range bm25Results {
 		if r.Score > maxBM25 {
@@ -426,7 +450,7 @@ func (e *Engine) buildBM25Results(bm25Results []bm25.SearchResult, score scorerF
 		}
 
 		normalizedBM25 := r.Score / maxBM25
-		popScore := score(r.ProductID, 0)
+		popScore := score.Score(r.ProductID, 0)
 		combined := bm25Alpha*normalizedBM25 + bm25PopAlpha*popScore
 
 		results = append(results, Result{
@@ -447,11 +471,11 @@ func (e *Engine) buildBM25Results(bm25Results []bm25.SearchResult, score scorerF
 	}
 
 	// Compute highlights only for the final top-K results to minimize allocations.
-	queryWords := strings.Fields(query)
 	for i := range results {
-		hl := computeHighlights(e.lowerNames[results[i].ProductID], queryWords, query)
-		results[i].Highlights = hl
-		results[i].HighlightedName = buildHighlightedName(results[i].Product.Name, hl)
+		highlights, count := computeHighlights(e.lowerNames[results[i].ProductID], query)
+		results[i].Highlights = highlights
+		results[i].HighlightCount = count
+		results[i].HighlightedName = buildHighlightedName(results[i].Product.Name, highlights, count)
 	}
 
 	return results
@@ -459,13 +483,13 @@ func (e *Engine) buildBM25Results(bm25Results []bm25.SearchResult, score scorerF
 
 // buildResults converts index search results to engine results with combined scores.
 // Highlights are deferred — call addHighlights on the final results after truncation.
-func (e *Engine) buildResults(searchResults []index.SearchResult, matchType MatchType, score scorerFunc) []Result {
+func (e *Engine) buildResults(searchResults []index.SearchResult, matchType MatchType, score ranking.ScoreView) []Result {
 	results := make([]Result, 0, len(searchResults))
 	for _, sr := range searchResults {
 		if sr.ProductID < 0 || sr.ProductID >= len(e.products) {
 			continue
 		}
-		s := score(sr.ProductID, sr.Score)
+		s := score.Score(sr.ProductID, sr.Score)
 		results = append(results, Result{
 			Product:   e.products[sr.ProductID],
 			ProductID: sr.ProductID,
@@ -482,16 +506,16 @@ func (e *Engine) addHighlights(results []Result, query string) {
 	if len(results) == 0 {
 		return
 	}
-	queryWords := strings.Fields(query)
 	for i := range results {
-		hl := computeHighlights(e.lowerNames[results[i].ProductID], queryWords, query)
-		results[i].Highlights = hl
-		results[i].HighlightedName = buildHighlightedName(results[i].Product.Name, hl)
+		highlights, count := computeHighlights(e.lowerNames[results[i].ProductID], query)
+		results[i].Highlights = highlights
+		results[i].HighlightCount = count
+		results[i].HighlightedName = buildHighlightedName(results[i].Product.Name, highlights, count)
 	}
 }
 
 // categoryFallback returns cached products for the chosen category.
-func (e *Engine) categoryFallback(category string, exclude []index.SearchResult, score scorerFunc) []Result {
+func (e *Engine) categoryFallback(category string, exclude []index.SearchResult, score ranking.ScoreView) []Result {
 	if category == "" {
 		return nil
 	}
@@ -525,7 +549,7 @@ func (e *Engine) categoryFallback(category string, exclude []index.SearchResult,
 	return results
 }
 
-func (e *Engine) ensureCategoryCached(category string, score scorerFunc) ([]Result, bool) {
+func (e *Engine) ensureCategoryCached(category string, score ranking.ScoreView) ([]Result, bool) {
 	e.mu.RLock()
 	cached, ok := e.categoryCache[category]
 	_, dirty := e.dirtyCats[category]
@@ -548,9 +572,6 @@ func (e *Engine) ensureCategoryCached(category string, score scorerFunc) ([]Resu
 		return cached, true
 	}
 
-	if score == nil {
-		score = e.ranker.Scorer()
-	}
 	if e.categoryCache == nil {
 		e.categoryCache = make(map[string][]Result)
 	}
@@ -560,28 +581,28 @@ func (e *Engine) ensureCategoryCached(category string, score scorerFunc) ([]Resu
 	return cached, true
 }
 
-func (e *Engine) buildCategoryResults(category string, score scorerFunc) []Result {
+func (e *Engine) buildCategoryResults(category string, score ranking.ScoreView) []Result {
 	productIDs := e.index.ProductsByCategory(category)
 	if len(productIDs) == 0 {
 		return nil
 	}
 
 	scored := make([]Result, 0, min(len(productIDs), maxResults*2))
-	catWords := strings.Fields(category)
 	for _, id := range productIDs {
 		if id < 0 || id >= len(e.products) {
 			continue
 		}
-		s := score(id, fallbackRelevance)
+		s := score.Score(id, fallbackRelevance)
 		name := e.products[id].Name
-		hl := computeHighlights(e.lowerNames[id], catWords, category)
+		highlights, count := computeHighlights(e.lowerNames[id], category)
 		scored = append(scored, Result{
 			Product:         e.products[id],
 			ProductID:       id,
 			Score:           s,
 			MatchType:       MatchFallback,
-			Highlights:      hl,
-			HighlightedName: buildHighlightedName(name, hl),
+			Highlights:      highlights,
+			HighlightCount:  count,
+			HighlightedName: buildHighlightedName(name, highlights, count),
 		})
 	}
 
@@ -598,7 +619,7 @@ func (e *Engine) buildCategoryResults(category string, score scorerFunc) []Resul
 // rebuildCategoryCache precomputes the top maxResults products per category.
 // Caller must hold e.mu lock.
 func (e *Engine) rebuildCategoryCache() {
-	score := e.ranker.Scorer()
+	score := e.ranker.ScoreView()
 	cache := make(map[string][]Result)
 
 	// Get all unique categories
@@ -613,4 +634,129 @@ func (e *Engine) rebuildCategoryCache() {
 // allCategories returns all unique category names.
 func (e *Engine) allCategories() []string {
 	return slices.Collect(e.index.CategoryNames())
+}
+
+func normalizeQuery(s string) string {
+	start := 0
+	end := len(s)
+	for start < end && isASCIIWhitespace(s[start]) {
+		start++
+	}
+	for start < end && isASCIIWhitespace(s[end-1]) {
+		end--
+	}
+	s = s[start:end]
+	if s == "" {
+		return ""
+	}
+	for i := range len(s) {
+		c := s[i]
+		if c >= utf8.RuneSelf || (c >= 'A' && c <= 'Z') {
+			return strings.ToLower(s)
+		}
+	}
+	return s
+}
+
+func isASCIIWhitespace(b byte) bool {
+	switch b {
+	case ' ', '\t', '\n', '\r', '\f', '\v':
+		return true
+	default:
+		return false
+	}
+}
+
+func extractNormalizedTrigrams(dst []string, s string) []string {
+	if len(s) < 3 {
+		return nil
+	}
+	need := len(s) - 2
+	if cap(dst) < need {
+		dst = make([]string, 0, need)
+	} else {
+		dst = dst[:0]
+	}
+	for i := range need {
+		dst = append(dst, s[i:i+3])
+	}
+	return dst
+}
+
+func forEachQueryWord(query string, yield func(word string)) {
+	start := -1
+	for i := 0; i <= len(query); i++ {
+		if i < len(query) && !isASCIIWhitespace(query[i]) {
+			if start < 0 {
+				start = i
+			}
+			continue
+		}
+		if start >= 0 {
+			yield(query[start:i])
+			start = -1
+		}
+	}
+}
+
+func lessResult(a, b Result) bool {
+	if a.Score != b.Score {
+		return a.Score < b.Score
+	}
+	return a.ProductID > b.ProductID
+}
+
+func siftDownResults(h []Result, root int) {
+	for {
+		child := 2*root + 1
+		if child >= len(h) {
+			return
+		}
+		if child+1 < len(h) && lessResult(h[child+1], h[child]) {
+			child++
+		}
+		if !lessResult(h[child], h[root]) {
+			return
+		}
+		h[root], h[child] = h[child], h[root]
+		root = child
+	}
+}
+
+func pushTopResult(h []Result, r Result) []Result {
+	if len(h) < maxResults {
+		h = append(h, r)
+		for i := len(h) - 1; i > 0; {
+			parent := (i - 1) / 2
+			if !lessResult(h[i], h[parent]) {
+				break
+			}
+			h[i], h[parent] = h[parent], h[i]
+			i = parent
+		}
+		return h
+	}
+	if !lessResult(h[0], r) {
+		return h
+	}
+	h[0] = r
+	siftDownResults(h, 0)
+	return h
+}
+
+func drainTopResults(h []Result) []Result {
+	if len(h) == 0 {
+		return nil
+	}
+	results := make([]Result, len(h))
+	for i := len(results) - 1; i >= 0; i-- {
+		results[i] = h[0]
+		last := len(h) - 1
+		h[0] = h[last]
+		h = h[:last]
+		if len(h) > 0 {
+			siftDownResults(h, 0)
+		}
+	}
+	return results
 }

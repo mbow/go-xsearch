@@ -110,6 +110,22 @@ func TestCombinedScoreZeroPopularity(t *testing.T) {
 	}
 }
 
+func TestScoreViewMatchesCombinedScore(t *testing.T) {
+	t.Parallel()
+	r := New(0.05, 0.6, 100)
+	now := time.Now()
+	r.SetSelections(1, []time.Time{now, now})
+	r.SetSelections(2, []time.Time{now})
+
+	view := r.ScoreView()
+	if got, want := view.Popularity(1), r.NormalizedPopularity(1); math.Abs(got-want) > 1e-9 {
+		t.Fatalf("Popularity mismatch: got %f, want %f", got, want)
+	}
+	if got, want := view.Score(2, 0.75), r.CombinedScore(2, 0.75); math.Abs(got-want) > 1e-9 {
+		t.Fatalf("Score mismatch: got %f, want %f", got, want)
+	}
+}
+
 func TestSaveAndLoad(t *testing.T) {
 	t.Parallel()
 	r := New(0.05, 0.6, 100)

@@ -14,6 +14,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"unicode/utf8"
 
 	"github.com/mbow/go-xsearch/catalog"
 )
@@ -22,15 +23,54 @@ import (
 // from the normalized (lowercased, trimmed) input.
 // Returns nil if the input has fewer than 3 characters after normalization.
 func ExtractTrigrams(s string) []string {
-	s = strings.ToLower(strings.TrimSpace(s))
+	return extractTrigramsNormalized(nil, normalizeQuery(s))
+}
+
+func extractTrigramsNormalized(dst []string, s string) []string {
 	if len(s) < 3 {
 		return nil
 	}
-	trigrams := make([]string, 0, len(s)-2)
-	for i := range len(s) - 2 {
-		trigrams = append(trigrams, s[i:i+3])
+	need := len(s) - 2
+	if cap(dst) < need {
+		dst = make([]string, 0, need)
+	} else {
+		dst = dst[:0]
 	}
-	return trigrams
+	for i := range need {
+		dst = append(dst, s[i:i+3])
+	}
+	return dst
+}
+
+func normalizeQuery(s string) string {
+	start := 0
+	end := len(s)
+	for start < end && isASCIIWhitespace(s[start]) {
+		start++
+	}
+	for start < end && isASCIIWhitespace(s[end-1]) {
+		end--
+	}
+	s = s[start:end]
+	if s == "" {
+		return ""
+	}
+	for i := range len(s) {
+		c := s[i]
+		if c >= utf8.RuneSelf || (c >= 'A' && c <= 'Z') {
+			return strings.ToLower(s)
+		}
+	}
+	return s
+}
+
+func isASCIIWhitespace(b byte) bool {
+	switch b {
+	case ' ', '\t', '\n', '\r', '\f', '\v':
+		return true
+	default:
+		return false
+	}
 }
 
 // SearchResult holds a product match with its Jaccard similarity score.
@@ -168,14 +208,15 @@ func NewIndex(products []catalog.Product) *Index {
 // Search returns products matching query, scored by Jaccard similarity.
 // For queries shorter than 3 characters, it falls back to prefix matching.
 func (idx *Index) Search(query string) []SearchResult {
-	query = strings.ToLower(strings.TrimSpace(query))
+	query = normalizeQuery(query)
 	if query == "" {
 		return nil
 	}
 	if len(query) < 3 {
 		return idx.prefixSearch(query)
 	}
-	queryGrams := ExtractTrigrams(query)
+	var trigramBuf [16]string
+	queryGrams := extractTrigramsNormalized(trigramBuf[:0], query)
 	if len(queryGrams) == 0 {
 		return nil
 	}
@@ -304,12 +345,13 @@ func (idx *Index) prefixSearch(query string) []SearchResult {
 // Jaccard similarity of their trigrams. Only categories with a positive
 // score are returned.
 func (idx *Index) SearchCategories(query string) []string {
-	query = strings.ToLower(strings.TrimSpace(query))
+	query = normalizeQuery(query)
 	if query == "" {
 		return nil
 	}
 
-	queryGrams := ExtractTrigrams(query)
+	var trigramBuf [16]string
+	queryGrams := extractTrigramsNormalized(trigramBuf[:0], query)
 	if len(queryGrams) == 0 {
 		var matches []string
 		for cat := range idx.catProducts {
@@ -361,12 +403,13 @@ func (idx *Index) SearchCategories(query string) []string {
 
 // BestCategory returns the single best-matching category for query.
 func (idx *Index) BestCategory(query string) (string, bool) {
-	query = strings.ToLower(strings.TrimSpace(query))
+	query = normalizeQuery(query)
 	if query == "" {
 		return "", false
 	}
 
-	queryGrams := ExtractTrigrams(query)
+	var trigramBuf [16]string
+	queryGrams := extractTrigramsNormalized(trigramBuf[:0], query)
 	if len(queryGrams) == 0 {
 		best := ""
 		for cat := range idx.catProducts {
