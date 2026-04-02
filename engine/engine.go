@@ -40,7 +40,7 @@ const maxHighlights = 4
 
 // Result is a single search result with metadata.
 type Result struct {
-	Product         catalog.Product
+	Product         *catalog.Product
 	ProductID       int
 	Score           float64
 	MatchType       MatchType
@@ -290,7 +290,7 @@ func (e *Engine) searchInternal(query string) []Result {
 			continue
 		}
 		results = pushTopResult(results, Result{
-			Product:   e.products[sr.ProductID],
+			Product:   &e.products[sr.ProductID],
 			ProductID: sr.ProductID,
 			Score:     score.Score(sr.ProductID, sr.Score),
 			MatchType: MatchDirect,
@@ -317,7 +317,7 @@ func (e *Engine) searchInternal(query string) []Result {
 	if len(results) == 0 {
 		return nil
 	}
-	results = drainTopResults(results)
+	sortTopResults(results)
 
 	// Compute highlights only for final top-K results.
 	e.addHighlights(results, query)
@@ -454,7 +454,7 @@ func (e *Engine) buildBM25Results(bm25Results []bm25.SearchResult, score ranking
 		combined := bm25Alpha*normalizedBM25 + bm25PopAlpha*popScore
 
 		results = append(results, Result{
-			Product:   e.products[r.ProductID],
+			Product:   &e.products[r.ProductID],
 			ProductID: r.ProductID,
 			Score:     combined,
 			MatchType: MatchDirect,
@@ -462,9 +462,7 @@ func (e *Engine) buildBM25Results(bm25Results []bm25.SearchResult, score ranking
 	}
 
 	// Sort by combined score (popularity may reorder BM25 ranking)
-	slices.SortFunc(results, func(a, b Result) int {
-		return cmp.Compare(b.Score, a.Score)
-	})
+	sortTopResults(results)
 
 	if len(results) > maxResults {
 		results = results[:maxResults]
@@ -491,7 +489,7 @@ func (e *Engine) buildResults(searchResults []index.SearchResult, matchType Matc
 		}
 		s := score.Score(sr.ProductID, sr.Score)
 		results = append(results, Result{
-			Product:   e.products[sr.ProductID],
+			Product:   &e.products[sr.ProductID],
 			ProductID: sr.ProductID,
 			Score:     s,
 			MatchType: matchType,
@@ -596,7 +594,7 @@ func (e *Engine) buildCategoryResults(category string, score ranking.ScoreView) 
 		name := e.products[id].Name
 		highlights, count := computeHighlights(e.lowerNames[id], category)
 		scored = append(scored, Result{
-			Product:         e.products[id],
+			Product:         &e.products[id],
 			ProductID:       id,
 			Score:           s,
 			MatchType:       MatchFallback,
@@ -607,9 +605,7 @@ func (e *Engine) buildCategoryResults(category string, score ranking.ScoreView) 
 	}
 
 	if len(scored) > maxResults {
-		slices.SortFunc(scored, func(a, b Result) int {
-			return cmp.Compare(b.Score, a.Score)
-		})
+		sortTopResults(scored)
 		scored = scored[:maxResults]
 	}
 
@@ -706,6 +702,13 @@ func lessResult(a, b Result) bool {
 	return a.ProductID > b.ProductID
 }
 
+func compareResults(a, b Result) int {
+	if a.Score != b.Score {
+		return cmp.Compare(b.Score, a.Score)
+	}
+	return cmp.Compare(a.ProductID, b.ProductID)
+}
+
 func siftDownResults(h []Result, root int) {
 	for {
 		child := 2*root + 1
@@ -744,19 +747,6 @@ func pushTopResult(h []Result, r Result) []Result {
 	return h
 }
 
-func drainTopResults(h []Result) []Result {
-	if len(h) == 0 {
-		return nil
-	}
-	results := make([]Result, len(h))
-	for i := len(results) - 1; i >= 0; i-- {
-		results[i] = h[0]
-		last := len(h) - 1
-		h[0] = h[last]
-		h = h[:last]
-		if len(h) > 0 {
-			siftDownResults(h, 0)
-		}
-	}
-	return results
+func sortTopResults(results []Result) {
+	slices.SortFunc(results, compareResults)
 }

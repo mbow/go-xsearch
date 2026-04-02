@@ -76,6 +76,38 @@ func TestHandleSearchEmpty(t *testing.T) {
 	}
 }
 
+func TestHandleSearchFallbackSection(t *testing.T) {
+	t.Parallel()
+	app := testApp()
+
+	req := httptest.NewRequest("GET", "/search?q=beer", nil)
+	w := httptest.NewRecorder()
+	app.HandleSearch(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "Related products") {
+		t.Error("expected fallback section for category search")
+	}
+}
+
+func TestHandleSearchNoResults(t *testing.T) {
+	t.Parallel()
+	app := testApp()
+
+	req := httptest.NewRequest("GET", "/search?q=zz", nil)
+	w := httptest.NewRecorder()
+	app.HandleSearch(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "No results found") {
+		t.Error("expected no-results section")
+	}
+}
+
 func TestHandleSelect(t *testing.T) {
 	t.Parallel()
 	app := testApp()
@@ -105,4 +137,3 @@ func TestHandleSelectInvalidID(t *testing.T) {
 		t.Errorf("expected 400, got %d", w.Code)
 	}
 }
-

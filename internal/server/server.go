@@ -5,6 +5,7 @@ package server
 import (
 	"bytes"
 	"encoding/json"
+	"html"
 	"html/template"
 	"log"
 	"maps"
@@ -29,7 +30,6 @@ type App struct {
 	Engine       *engine.Engine
 	TemplateDir  string // path to templates directory (default "templates")
 	indexTmpl    *template.Template
-	resultTmpl   *template.Template
 	Cache        *FragmentCache
 	bufPool      sync.Pool
 	productCount int          // cached product count for validation
@@ -54,7 +54,6 @@ func New(eng *engine.Engine, cacheSize int) *App {
 // Must be called before serving requests.
 func (app *App) LoadTemplates() {
 	app.indexTmpl = template.Must(template.New("index.html").ParseFiles(app.TemplateDir + "/index.html"))
-	app.resultTmpl = template.Must(template.New("results.html").ParseFiles(app.TemplateDir + "/results.html"))
 }
 
 // Routes registers all HTTP routes on the given mux.
@@ -106,14 +105,6 @@ func noDirectoryListing(fs http.FileSystem) http.Handler {
 	})
 }
 
-// ResultsData is the template data for search results.
-type ResultsData struct {
-	Query           string
-	DirectResults   []engine.Result
-	FallbackResults []engine.Result
-	Ghost           string
-}
-
 // HandleIndex serves the main search page.
 func (app *App) HandleIndex(w http.ResponseWriter, r *http.Request) {
 	if err := app.indexTmpl.Execute(w, nil); err != nil {
@@ -143,35 +134,11 @@ func (app *App) HandleSearch(w http.ResponseWriter, r *http.Request) {
 
 	results := app.Engine.Search(query)
 
-	data := ResultsData{Query: query}
-	for _, res := range results {
-		if res.MatchType == engine.MatchDirect {
-			data.DirectResults = append(data.DirectResults, res)
-		} else {
-			data.FallbackResults = append(data.FallbackResults, res)
-		}
-	}
-
-	// Ghost text: completion suffix from the top result.
-	// Uses len(query) to index into name — safe because query is already
-	// lowercased and ASCII lowering preserves byte length.
-	if len(results) > 0 {
-		name := results[0].Product.Name
-		lowerName := strings.ToLower(name)
-		if strings.HasPrefix(lowerName, query) && len(query) <= len(name) {
-			data.Ghost = name[len(query):]
-		}
-	}
-
 	buf := app.bufPool.Get().(*bytes.Buffer)
 	buf.Reset()
 	defer app.bufPool.Put(buf)
 
-	if err := app.resultTmpl.Execute(buf, data); err != nil {
-		log.Printf("error rendering results template: %v", err)
-		http.Error(w, "internal error", http.StatusInternalServerError)
-		return
-	}
+	renderResultsFragment(buf, query, results)
 	rendered := bytes.Clone(buf.Bytes())
 
 	app.Cache.Set(query, rendered)
@@ -180,6 +147,115 @@ func (app *App) HandleSearch(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Length", strconv.Itoa(len(rendered)))
 	w.Header().Set("X-Cache", "MISS")
 	w.Write(rendered) //nolint:errcheck // best-effort write to HTTP client
+}
+
+func renderResultsFragment(buf *bytes.Buffer, query string, results []engine.Result) {
+	buf.WriteString(`<div id="results-inner" data-ghost="`)
+	buf.WriteString(html.EscapeString(ghostSuffix(query, results)))
+	buf.WriteString("\">\n")
+
+	hasDirect := false
+	for _, res := range results {
+		if res.MatchType != engine.MatchDirect {
+			continue
+		}
+		if !hasDirect {
+			buf.WriteString("<div class=\"result-section\">Results</div>\n")
+			hasDirect = true
+		}
+		writeResultItem(buf, res)
+	}
+
+	hasFallback := false
+	for _, res := range results {
+		if res.MatchType != engine.MatchFallback {
+			continue
+		}
+		if !hasFallback {
+			buf.WriteString("<div class=\"result-section\">Related products</div>\n")
+			hasFallback = true
+		}
+		writeResultItem(buf, res)
+	}
+
+	if !hasDirect && !hasFallback && query != "" {
+		buf.WriteString("<div class=\"result-section\">No results found</div>\n")
+	}
+
+	buf.WriteString("</div>\n")
+}
+
+func writeResultItem(buf *bytes.Buffer, res engine.Result) {
+	buf.WriteString("<div class=\"result-item\"\n")
+	buf.WriteString("     hx-post=\"/select\"\n")
+	buf.WriteString("     hx-vals='{\"id\": \"")
+	writeInt(buf, res.ProductID)
+	buf.WriteString("\"}'\n")
+	buf.WriteString("     hx-swap=\"none\"\n")
+	buf.WriteString("     hx-indicator=\"false\">\n")
+	buf.WriteString("    <div class=\"result-name\">")
+	buf.WriteString(string(res.HighlightedName))
+	buf.WriteString("</div>\n")
+	buf.WriteString("    <div class=\"result-category\">")
+	if res.Product != nil {
+		buf.WriteString(html.EscapeString(res.Product.Category))
+	}
+	buf.WriteString("</div>\n")
+	buf.WriteString("</div>\n")
+}
+
+func writeInt(buf *bytes.Buffer, n int) {
+	var scratch [20]byte
+	buf.Write(strconv.AppendInt(scratch[:0], int64(n), 10))
+}
+
+func ghostSuffix(query string, results []engine.Result) string {
+	if len(results) == 0 || results[0].Product == nil {
+		return ""
+	}
+	name := results[0].Product.Name
+	if len(query) > len(name) {
+		return ""
+	}
+	if hasFoldedASCIIPrefix(name, query) {
+		return name[len(query):]
+	}
+	if containsNonASCII(query) || containsNonASCII(name[:len(query)]) {
+		lowerName := strings.ToLower(name)
+		if strings.HasPrefix(lowerName, query) {
+			return name[len(query):]
+		}
+	}
+	return ""
+}
+
+func hasFoldedASCIIPrefix(s, lowerPrefix string) bool {
+	if len(lowerPrefix) > len(s) {
+		return false
+	}
+	for i := range len(lowerPrefix) {
+		sb := s[i]
+		pb := lowerPrefix[i]
+		if sb >= utf8.RuneSelf || pb >= utf8.RuneSelf {
+			return false
+		}
+		if 'A' <= sb && sb <= 'Z' {
+			sb += 'a' - 'A'
+		}
+		if sb != pb {
+			return false
+		}
+	}
+	return true
+}
+
+func containsNonASCII(s string) bool {
+	for i := range len(s) {
+		if s[i] >= utf8.RuneSelf {
+			return true
+		}
+	}
+	return false
 }
 
 // HandleSelect records a user selecting a product and invalidates the cache.
@@ -266,7 +342,7 @@ func (c *FragmentCache) Set(key string, value []byte) {
 func (c *FragmentCache) Invalidate() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.entries = make(map[string][]byte, c.maxSize)
+	clear(c.entries)
 }
 
 // RateLimiter implements a per-IP token bucket rate limiter.
