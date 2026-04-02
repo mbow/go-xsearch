@@ -50,6 +50,9 @@ func TestHandleIndex(t *testing.T) {
 	if !strings.Contains(body, `aria-live="polite"`) {
 		t.Error("expected results region to announce updates")
 	}
+	if !strings.Contains(body, `id="ghost-prefix"`) || !strings.Contains(body, `id="ghost-suffix"`) {
+		t.Error("expected ghost text to render prefix and suffix separately")
+	}
 }
 
 func TestHandleSearch(t *testing.T) {

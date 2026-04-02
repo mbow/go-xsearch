@@ -13,14 +13,18 @@
         .ghost-text {
             position: absolute; top: 0; left: 0;
             padding: 12px; font-size: 16px; color: #ccc;
-            pointer-events: none; white-space: pre;
+            pointer-events: none; white-space: nowrap;
             font-family: system-ui, sans-serif;
             border: 2px solid transparent;
+            line-height: 1.2;
         }
+        .ghost-prefix, .ghost-suffix { white-space: pre; }
+        .ghost-prefix { visibility: hidden; }
         input[type="search"] {
             width: 100%; padding: 12px; font-size: 16px;
             border: 2px solid #ccc; border-radius: 8px;
             background: transparent; position: relative;
+            line-height: 1.2;
         }
         input[type="search"]:focus { outline: none; border-color: #4a90d9; }
         #results { margin-top: 8px; }
@@ -41,7 +45,7 @@
 <body>
     <h1>Product Search</h1>
     <div class="search-container">
-        <span id="ghost" class="ghost-text"></span>
+        <span id="ghost" class="ghost-text" aria-hidden="true"><span id="ghost-prefix" class="ghost-prefix"></span><span id="ghost-suffix" class="ghost-suffix"></span></span>
         <input type="search"
                id="search-input"
                name="q"
@@ -64,16 +68,28 @@
     var activeIdx = -1;
     var latestIssuedQuery = '';
     var input = document.getElementById('search-input');
-    var ghost = document.getElementById('ghost');
+    var ghostPrefix = document.getElementById('ghost-prefix');
+    var ghostSuffix = document.getElementById('ghost-suffix');
     var results = document.getElementById('results');
 
-    function setGhostSuffix(suffix) {
-        if (!input || !ghost) return;
+    function clearGhost() {
+        if (ghostPrefix) ghostPrefix.textContent = '';
+        if (ghostSuffix) ghostSuffix.textContent = '';
+    }
+
+    function getGhostValue() {
+        if (!input || !ghostSuffix || !ghostSuffix.textContent) return '';
+        return input.value + ghostSuffix.textContent;
+    }
+
+    function setGhostSuggestion(suffix) {
+        if (!input || !ghostPrefix || !ghostSuffix) return;
         if (!input.value) {
-            ghost.textContent = '';
+            clearGhost();
             return;
         }
-        ghost.textContent = input.value + (suffix || '');
+        ghostPrefix.textContent = input.value;
+        ghostSuffix.textContent = suffix || '';
     }
 
     function resetSelection() {
@@ -101,7 +117,7 @@
             latestIssuedQuery = '';
             setBusy(false);
             if (results) results.innerHTML = '';
-            if (ghost) ghost.textContent = '';
+            clearGhost();
             evt.preventDefault();
             return;
         }
@@ -125,11 +141,11 @@
         setBusy(false);
         var inner = document.getElementById('results-inner');
         if (!inner) {
-            setGhostSuffix('');
+            clearGhost();
             return;
         }
         var suffix = inner.getAttribute('data-ghost') || '';
-        setGhostSuffix(suffix);
+        setGhostSuggestion(suffix);
     });
 
     document.body.addEventListener('htmx:responseError', function(evt) {
@@ -149,7 +165,7 @@
 
     input.addEventListener('input', function() {
         resetSelection();
-        setGhostSuffix('');
+        clearGhost();
         if (this.value.trim() !== '') return;
         latestIssuedQuery = '';
         setBusy(false);
@@ -161,9 +177,10 @@
         var items = document.querySelectorAll('.result-item');
 
         if (e.key === 'Tab') {
-            if (ghost.textContent && ghost.textContent !== this.value) {
+            var ghostValue = getGhostValue();
+            if (ghostValue && ghostValue !== this.value) {
                 e.preventDefault();
-                this.value = ghost.textContent;
+                this.value = ghostValue;
                 htmx.trigger(this, 'search');
             }
             return;

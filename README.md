@@ -1,7 +1,7 @@
 <div align="center">
-  <img src="docs/logo.png" alt="go-xsearch" width="180" />
-
 # go-xsearch
+
+  <img src="docs/logo.png" alt="go-xsearch" width="180" />
 
 **Autocomplete search engine. Single binary. Zero infrastructure.**
 
@@ -13,11 +13,13 @@
 </div>
 
 A cold-cache search — including BM25 scoring, typo correction, popularity
-ranking, and HTML rendering — completes in **38 microseconds**. A warm cache
-hit returns in **2 microseconds**. No database. No Redis. No Elasticsearch.
+ranking, and HTML rendering — completes in **6.7 microseconds**. A warm cache
+hit returns in **2.4 microseconds**. No database. No Redis. No Elasticsearch.
 Just `go run .`
 
-![Search Demo](docs/demo.gif)
+<p align="center">
+  <img src="docs/demo.gif" alt="Search Demo" />
+</p>
 
 ## Quick Start
 
@@ -47,16 +49,23 @@ exponential decay.
 ## Real-World Performance
 
 What users actually experience — full HTTP round-trip including search,
-ranking, and template rendering. 10,000 products on an AMD Ryzen 9 5950X.
+ranking, and HTML rendering. 10,000 products on an AMD Ryzen 9 5950X.
 
 | Scenario | Latency | Context |
 | -------- | ------: | ------- |
-| Warm cache hit | **2.2 µs** | Faster than a DNS lookup |
-| Cold cache miss | **38 µs** | 440x faster than a single 60 FPS frame (16,667 µs) |
-| 32 concurrent searches | **170 ns/op** | Scales linearly under load |
+| Warm cache hit | **2.4 µs** | Cached HTMX fragment returned directly |
+| Cold cache miss | **6.7 µs** | Full search + render path, ~84% faster than the previous 41.7 µs pass |
+| 32 concurrent searches | **144 ns/op** | Engine search stays flat under parallel load |
 
 Every search data structure is precomputed at build time and embedded in the
 binary. Startup is instant — zero file I/O, zero network calls.
+
+### Recent Gains
+
+- **Cold-cache HTTP search**: `41.7 µs → 6.7 µs` and `243 → 38 allocs/op`
+- **Selection POST path**: `11.4 µs → 2.3 µs` and `31 → 25 allocs/op`
+- **BM25 path**: `2.59 µs → 2.30 µs` and `4 → 3 allocs/op`
+- **Jaccard typo path**: `1.83 µs → 1.46 µs` and `4 → 3 allocs/op`
 
 ## How It Works
 
@@ -154,32 +163,39 @@ category.
 
 ## Raw Benchmarks
 
-Engine-level numbers for those who want the full picture. Same machine and
-dataset as above (10K products, AMD Ryzen 9 5950X).
+Engine-level numbers for the full picture. Same machine and dataset as above
+(10K products, AMD Ryzen 9 5950X).
 
 | Benchmark | Example | Latency | Allocs | Bytes |
 | --------- | ------- | ------: | -----: | ----: |
-| Cached prefix (1-2 chars) | `"b"` | **13 ns** | 0 | 0 |
-| Category match | `"beer"` | **18 ns** | 0 | 0 |
-| Prefix (3+ chars) | `"nik"` | **240 ns** | 1 | 16 |
-| Bloom rejection | `"xzqwvp"` | **524 ns** | 1 | 64 |
-| Fuzzy / typo (Jaccard) | `"budwiser"` | **1.8 µs** | 8 | 1,627 |
-| Full BM25 pipeline | `"budweiser"` | **2.5 µs** | 8 | 1,643 |
-| HTTP warm cache | `GET /search?q=bud` | **2.2 µs** | 24 | 9,021 |
-| HTTP cold cache | `GET /search?q=bud` | **38 µs** | 256 | 118K |
-| Parallel (32 goroutines) | mixed queries | **170 ns** | 7 | 902 |
+| Cached prefix (1-2 chars) | `"b"` | **12 ns** | 0 | 0 |
+| Category match | `"beer"` | **20 ns** | 0 | 0 |
+| Prefix (3+ chars) | `"nik"` | **307 ns** | 0 | 0 |
+| Bloom rejection | `"xzqwvp"` | **460 ns** | 0 | 0 |
+| Fuzzy / typo (Jaccard) | `"budwiser"` | **1.46 µs** | 3 | 160 |
+| Full BM25 pipeline | `"budweiser"` | **2.29 µs** | 3 | 160 |
+| HTTP warm cache | `GET /search?q=bud` | **2.4 µs** | 24 | 9,237 |
+| HTTP cold cache | `GET /search?q=bud` | **6.7 µs** | 38 | 13.6 KiB |
+| HTTP select | `POST /select` | **2.3 µs** | 25 | 6.7 KiB |
+| Parallel (32 goroutines) | mixed queries | **144 ns** | 3 | 437 |
 
 ### Key Optimisations
 
 - **Bloom-first pipeline** — rejects gibberish before BM25 or Jaccard runs
-- **Single trigram extraction** — computed once, reused by Bloom check, Jaccard
-  search, and category lookup
-- **Typed min-heap** for top-K — no `container/heap` interface boxing
-- **Pooled bitsets** for candidate dedup — zero-alloc on the hot path
-- **Stack-allocated buffers** — trigram sort, candidate tracking, and highlight
-  arrays avoid heap escape for typical queries
-- **Slice-indexed ranking** — `[]float64` by product ID replaces map lookups
-- **Sort+compact dedup** — replaces `map[string]struct{}` for trigram sets
+- **Single trigram extraction** — one pass feeds Bloom checks, Jaccard scoring,
+  and category fallback
+- **Typed top-K selection** — min-heap selection with in-place final sort, no
+  `container/heap` interface boxing
+- **Inline highlight storage** — fixed-size highlight arrays avoid per-result
+  slice allocation
+- **Pointer-backed results** — avoids copying full product structs through the
+  scoring pipeline
+- **Direct HTMX fragment rendering** — cache-miss responses skip template
+  reflection on the hot path
+- **Reusable fragment cache invalidation** — `clear(map)` instead of allocating
+  a new cache map on every selection
+- **Fast ASCII paths** — query normalization and ghost-text completion avoid
+  unnecessary lowercasing for the common case
 - **Parallel prefix cache** — startup scales with CPU cores
 
 ## Updating Product Data
