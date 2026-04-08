@@ -11,7 +11,7 @@ Extract the core search functionality from the go-xsearch project into a clean, 
 
 - **Domain-agnostic:** Library knows nothing about products, drinks, or any specific data model. Consumers implement `Searchable`.
 - **Field-based with weights:** Consumers define multiple searchable fields with weights. Fields support multiple values (tags, ingredients, variants). Weights have a concrete effect on scoring (see Scoring Model).
-- **String IDs:** IDs are strings to accommodate slugs, UUIDs, or numeric IDs as strings.
+- **String IDs:** IDs are strings to accommodate slugs, UUIDs, or numeric IDs as strings. IDs must be stable across rebuilds if external scorer state or selection history is persisted.
 - **External scoring via `Scorer` interface:** Library blends relevance with an optional external signal. Consumers implement `Scorer` for popularity, recency, business logic, etc. Contract is tightened (see Scorer Contract).
 - **Bloom filter as optional component:** Exported, configurable, included in snapshots. Consumers enable via `WithBloom()` or use standalone.
 - **CBOR snapshots:** Build indices once, serialize, reload fast. CBOR is the only supported format. Snapshots are self-contained and versioned (see Snapshot Contract).
@@ -37,6 +37,8 @@ type Searchable interface {
     SearchFields() []Field
 }
 ```
+
+Field names must be non-empty and unique within a single item. Empty field values are ignored during indexing.
 
 ### Scorer Contract
 
@@ -78,6 +80,13 @@ type Result struct {
     Score      float64
     MatchType  MatchType
     Highlights map[string][]Highlight // field name -> highlight spans
+}
+
+// Item is the stored representation of an indexed document.
+// It is returned by Engine.Get for rendering, lookup, or consumer-side hydration.
+type Item struct {
+    ID     string
+    Fields []Field
 }
 ```
 
@@ -128,13 +137,14 @@ If `WithFallbackField` is not set, no fallback occurs — only direct matches ar
 ```go
 // New creates a search engine from a slice of Searchable items.
 // Returns an error if any items have duplicate IDs, empty IDs,
+// fields with empty or duplicate names within an item,
 // or fields with non-positive weights.
 func New(items []Searchable, opts ...Option) (*Engine, error)
 
 // NewFromSnapshot loads a pre-built engine from a CBOR snapshot.
 // Returns an error for malformed CBOR, version mismatches, or corrupted data.
 // Build-time index options (BM25 params, bloom config) are restored from the
-// snapshot. Only WithScorer and WithAlpha can be overridden at load time.
+// snapshot. Only WithScorer, WithAlpha, and WithLimit can be overridden at load time.
 func NewFromSnapshot(data []byte, opts ...Option) (*Engine, error)
 ```
 
@@ -157,7 +167,7 @@ func WithBM25(k1, b float64) Option
 func WithAlpha(alpha float64) Option
 
 // WithLimit sets the maximum number of results returned per search.
-// Default: 10. Clamped to [2, 100].
+// Default: 10. Must be in [2, 100] or New/NewFromSnapshot returns an error.
 func WithLimit(n int) Option
 
 // WithFallbackField sets the field name used for group-based fallback.
@@ -173,6 +183,10 @@ func WithFallbackField(fieldName string) Option
 // Search returns results matching the query, ordered by combined score.
 func (e *Engine) Search(query string) []Result
 
+// Get returns the indexed item by ID, including original field values.
+// Returned data is a copy and safe for the caller to retain.
+func (e *Engine) Get(id string) (Item, bool)
+
 // Snapshot serializes the engine's indices to CBOR for fast reload.
 func (e *Engine) Snapshot() ([]byte, error)
 ```
@@ -184,12 +198,13 @@ Snapshots are **self-contained** CBOR blobs. They embed:
 - N-gram inverted index structures
 - BM25 index structures (term frequencies, IDF values, posting lists, prefix data)
 - Bloom filter bitset (if enabled at build time)
-- Build-time configuration (BM25 k1/b, bloom bitsPerItem, fallback field name, limit)
+- Build-time configuration (BM25 k1/b, bloom bitsPerItem, fallback field name)
+- Default result limit from the source engine, which may be overridden at load time via `WithLimit`
 - Version header: magic bytes (`XSRC`) + uint8 version number
 
 `NewFromSnapshot` rejects snapshots with unknown magic bytes or unsupported versions.
 
-Build-time options (BM25 params, bloom config, fallback field) are stored in and restored from the snapshot. Only runtime options (`WithScorer`, `WithAlpha`) can be overridden at load time via `NewFromSnapshot` options. Passing build-time options to `NewFromSnapshot` is an error.
+Build-time options (BM25 params, bloom config, fallback field) are stored in and restored from the snapshot. Runtime options (`WithScorer`, `WithAlpha`, `WithLimit`) may be provided when loading via `NewFromSnapshot`. Passing build-time options to `NewFromSnapshot` is an error.
 
 ## Bloom Filter
 
@@ -265,7 +280,8 @@ go-xsearch/
 
 **`catalog/`:**
 - `Product` gains `SearchID() string` and `SearchFields() []Field` methods
-- `SearchID()` returns `strconv.Itoa(index)` or a string-based ID scheme
+- `SearchID()` returns a stable string ID; do not use slice position
+- If the source data has no explicit ID, derive a deterministic ID (for example, a slug from canonical name/category) during generation
 
 **`ranking/`:**
 - Selection map changes from `map[int][]time.Time` to `map[string][]time.Time`
@@ -277,14 +293,14 @@ go-xsearch/
 **`internal/server/`:**
 - Imports `xsearch.Engine` directly instead of `engine.Engine`
 - Uses `xsearch.Result` — no more `result.Product` or `result.HighlightedName`
-- Server builds `template.HTML` highlighting from `xsearch.Result.Highlights` spans + catalog lookup by string ID
-- `/select` handler: removes `strconv.Atoi` validation, validates string ID against a known ID set (e.g., `catalog.GetByID(id)`)
+- Server builds `template.HTML` highlighting from `xsearch.Result.Highlights` spans + `engine.Get(id)` lookup
+- `/select` handler: removes `strconv.Atoi` validation, validates string ID via `engine.Get(id)` or a known ID set
 - `writeResultItem` uses string ID in `hx-vals`
 
 **`main.go`:**
-- Wires up `xsearch.New()` with options instead of `engine.NewFromEmbedded()`
-- Passes `xsearch.WithFallbackField("category")` to preserve current behavior
-- Passes `xsearch.WithBloom(100)` to enable bloom pre-filtering
+- Loads the embedded self-contained snapshot and calls `xsearch.NewFromSnapshot()`
+- Passes `xsearch.WithScorer(ranker)` and optionally `xsearch.WithAlpha(...)` at load time
+- Passes `xsearch.WithLimit(...)` at load time to set the UI result count
 
 **`cmd/generate/`:**
 - Uses `xsearch.New()` + `Snapshot()` to produce self-contained CBOR blob
@@ -312,10 +328,11 @@ go-xsearch/
 - Integration tests: construct an Engine with test Searchable items, verify search results
 - Scorer integration: verify external scores blend correctly with relevance; verify clamping of negative/NaN/Inf values
 - Snapshot round-trip: build engine, snapshot, reload, verify identical results; verify version rejection for bad snapshots
+- Lookup: verify `Get(id)` returns the original indexed fields after build and after snapshot reload
 - Bloom optional behavior: verify search works with and without bloom enabled
 - Fallback field: verify fallback grouping works, verify no fallback when not configured
-- Limit: verify WithLimit clamping and result count
-- Validation: verify New() rejects duplicate IDs, empty IDs, non-positive weights
+- Limit: verify WithLimit accepts [2, 100] and rejects out-of-range values
+- Validation: verify New() rejects duplicate IDs, empty IDs, empty field names, duplicate field names within an item, and non-positive weights
 - Multi-value highlights: verify ValueIndex correctness for fields with multiple values
 - Benchmarks: index construction, search latency, snapshot size
 
