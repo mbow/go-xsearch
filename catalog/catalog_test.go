@@ -63,3 +63,11 @@ func TestLoadProductsInvalidJSON(t *testing.T) {
 		t.Fatal("expected error for invalid JSON, got nil")
 	}
 }
+
+func TestStableID(t *testing.T) {
+	t.Parallel()
+	id := StableID(Product{Name: "Bud Light", Category: "beer"})
+	if id != "beer-bud-light" {
+		t.Fatalf("unexpected stable id: %q", id)
+	}
+}

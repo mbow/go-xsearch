@@ -1,44 +1,19 @@
 // cmd/generate/main.go reads data/products.json and produces catalog/data.cbor
-// containing products, a pre-built bloom filter, and a pre-built n-gram index.
-//
-// Usage:
-//
-//	go run cmd/generate/main.go
-//	go run cmd/generate/main.go -input data/products.json -output catalog/data.cbor
+// containing a self-contained xsearch snapshot.
 package main
 
 import (
-	"bytes"
-	"compress/gzip"
-	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
 
-	"github.com/mbow/go-xsearch/bm25"
-	"github.com/mbow/go-xsearch/bloom"
 	"github.com/mbow/go-xsearch/catalog"
-	"github.com/mbow/go-xsearch/index"
-
-	"github.com/fxamacker/cbor/v2"
-)
-
-// Payload is the full serialized dataset: products + pre-built index + bloom filter.
-type Payload struct {
-	Products  []catalog.Product `cbor:"products"`
-	BloomSnap bloom.Snapshot    `cbor:"bloom"`
-	IndexSnap index.Snapshot    `cbor:"index"`
-	BM25Snap  bm25.Snapshot     `cbor:"bm25"`
-}
-
-const (
-	bloomSize      = 20000
-	bloomHashCount = 3
+	"github.com/mbow/go-xsearch/xsearch"
 )
 
 func main() {
 	inputPath := flag.String("input", "data/products.json", "path to source JSON product catalog")
-	outputPath := flag.String("output", "catalog/data.cbor", "path to write CBOR output")
+	outputPath := flag.String("output", "catalog/data.cbor", "path to write snapshot output")
 	flag.Parse()
 
 	if err := run(*inputPath, *outputPath); err != nil {
@@ -48,95 +23,32 @@ func main() {
 }
 
 func run(inputPath, outputPath string) error {
-	// Read and parse source JSON
-	jsonData, err := os.ReadFile(inputPath)
+	products, err := catalog.LoadProducts(inputPath)
 	if err != nil {
-		return fmt.Errorf("reading %s: %w", inputPath, err)
+		return err
 	}
-
-	var products []catalog.Product
-	if err := json.Unmarshal(jsonData, &products); err != nil {
-		return fmt.Errorf("parsing JSON: %w", err)
-	}
-
 	if len(products) == 0 {
 		return fmt.Errorf("no products found in %s", inputPath)
 	}
 
-	// Build the n-gram index
-	idx := index.NewIndex(products)
-	indexSnap := idx.ToSnapshot()
-
-	// Build the bloom filter (scale size with product count)
-	numBits := uint64(bloomSize)
-	if len(products) > 1000 {
-		numBits = uint64(len(products)) * 100 // ~100 bits per product for low FP rate
-	}
-	bf := bloom.New(numBits, bloomHashCount)
-	for _, p := range products {
-		for _, g := range index.ExtractTrigrams(p.Name) {
-			bf.Add(g)
-		}
-		for _, g := range index.ExtractTrigrams(p.Category) {
-			bf.Add(g)
-		}
-		for _, tag := range p.Tags {
-			for _, g := range index.ExtractTrigrams(tag) {
-				bf.Add(g)
-			}
-		}
-	}
-	bloomSnap := bf.ToSnapshot()
-
-	// Build the BM25 index
-	bm25Idx := bm25.NewIndex(products)
-	bm25Snap := bm25Idx.ToSnapshot()
-
-	// Build full payload
-	payload := Payload{
-		Products:  products,
-		BloomSnap: bloomSnap,
-		IndexSnap: indexSnap,
-		BM25Snap:  bm25Snap,
-	}
-
-	// Canonical CBOR for deterministic output
-	em, err := cbor.EncOptions{
-		Sort: cbor.SortCanonical,
-	}.EncMode()
+	engine, err := xsearch.New(products,
+		xsearch.WithBloom(100),
+		xsearch.WithFallbackField("category"),
+		xsearch.WithLimit(10),
+	)
 	if err != nil {
-		return fmt.Errorf("creating CBOR encoder: %w", err)
+		return fmt.Errorf("building xsearch snapshot: %w", err)
 	}
 
-	cborData, err := em.Marshal(payload)
+	snapshot, err := engine.Snapshot()
 	if err != nil {
-		return fmt.Errorf("marshaling to CBOR: %w", err)
+		return fmt.Errorf("serializing snapshot: %w", err)
 	}
 
-	// Gzip compress the CBOR data
-	var gzBuf bytes.Buffer
-	gzWriter, err := gzip.NewWriterLevel(&gzBuf, gzip.BestCompression)
-	if err != nil {
-		return fmt.Errorf("creating gzip writer: %w", err)
-	}
-	if _, err := gzWriter.Write(cborData); err != nil {
-		return fmt.Errorf("gzip compressing: %w", err)
-	}
-	if err := gzWriter.Close(); err != nil {
-		return fmt.Errorf("closing gzip writer: %w", err)
-	}
-	gzData := gzBuf.Bytes()
-
-	if err := os.WriteFile(outputPath, gzData, 0644); err != nil {
+	if err := os.WriteFile(outputPath, snapshot, 0644); err != nil {
 		return fmt.Errorf("writing %s: %w", outputPath, err)
 	}
 
-	fmt.Printf("generated %s: %d products\n", outputPath, len(products))
-	fmt.Printf("  JSON: %d bytes -> CBOR: %d bytes -> gzip: %d bytes (%.0f%% total compression)\n",
-		len(jsonData), len(cborData), len(gzData),
-		(1-float64(len(gzData))/float64(len(jsonData)))*100)
-	fmt.Printf("  includes: pre-built bloom filter (%d bits) + n-gram index (%d posting lists) + BM25 index (%d terms)\n",
-		bloomSnap.Size, len(indexSnap.Posting), len(bm25Snap.Posting))
-
+	fmt.Printf("generated %s: %d products, %d bytes\n", outputPath, len(products), len(snapshot))
 	return nil
 }

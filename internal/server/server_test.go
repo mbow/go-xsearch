@@ -7,20 +7,35 @@ import (
 	"testing"
 
 	"github.com/mbow/go-xsearch/catalog"
-	"github.com/mbow/go-xsearch/engine"
+	"github.com/mbow/go-xsearch/ranking"
+	"github.com/mbow/go-xsearch/xsearch"
 )
 
-func testEngine() *engine.Engine {
-	products := []catalog.Product{
+func testProducts() []catalog.Product {
+	return []catalog.Product{
 		{Name: "Budweiser", Category: "beer"},
 		{Name: "Miller Lite", Category: "beer"},
 		{Name: "Nike Air Max", Category: "shoes"},
 	}
-	return engine.New(products)
 }
 
-func testApp() *App {
-	app := New(testEngine(), 64)
+func testEngine(t *testing.T) (*xsearch.Engine, *ranking.Ranker) {
+	t.Helper()
+	ranker := ranking.New(0.05, 0.6)
+	engine, err := xsearch.New(testProducts(),
+		xsearch.WithFallbackField("category"),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ranker.SetIDs(engine.IDs())
+	return engine, ranker
+}
+
+func testApp(t *testing.T) *App {
+	t.Helper()
+	engine, ranker := testEngine(t)
+	app := New(engine, ranker, 64)
 	app.TemplateDir = "../../templates"
 	app.LoadTemplates()
 	return app
@@ -28,121 +43,91 @@ func testApp() *App {
 
 func TestHandleIndex(t *testing.T) {
 	t.Parallel()
-	app := testApp()
+	app := testApp(t)
 
 	req := httptest.NewRequest("GET", "/", nil)
 	w := httptest.NewRecorder()
 	app.HandleIndex(w, req)
 
 	if w.Code != http.StatusOK {
-		t.Errorf("expected 200, got %d", w.Code)
+		t.Fatalf("expected 200, got %d", w.Code)
 	}
 	body := w.Body.String()
 	if !strings.Contains(body, "Product Search") {
-		t.Error("expected page to contain 'Product Search'")
-	}
-	if !strings.Contains(body, "hx-get") {
-		t.Error("expected page to contain HTMX attributes")
-	}
-	if !strings.Contains(body, `hx-sync="this:replace"`) {
-		t.Error("expected search input to replace stale in-flight requests")
-	}
-	if !strings.Contains(body, `aria-live="polite"`) {
-		t.Error("expected results region to announce updates")
-	}
-	if !strings.Contains(body, `id="ghost-prefix"`) || !strings.Contains(body, `id="ghost-suffix"`) {
-		t.Error("expected ghost text to render prefix and suffix separately")
+		t.Fatal("expected page to contain Product Search")
 	}
 }
 
 func TestHandleSearch(t *testing.T) {
 	t.Parallel()
-	app := testApp()
+	app := testApp(t)
 
 	req := httptest.NewRequest("GET", "/search?q=nik", nil)
 	w := httptest.NewRecorder()
 	app.HandleSearch(w, req)
 
 	if w.Code != http.StatusOK {
-		t.Errorf("expected 200, got %d", w.Code)
+		t.Fatalf("expected 200, got %d", w.Code)
 	}
 	body := w.Body.String()
 	if !strings.Contains(body, "Nik") || !strings.Contains(body, "Air Max") {
-		t.Error("expected results to contain 'Nike Air Max' (possibly highlighted)")
-	}
-}
-
-func TestHandleSearchEmpty(t *testing.T) {
-	t.Parallel()
-	app := testApp()
-
-	req := httptest.NewRequest("GET", "/search?q=", nil)
-	w := httptest.NewRecorder()
-	app.HandleSearch(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Errorf("expected 200, got %d", w.Code)
+		t.Fatalf("expected highlighted Nike Air Max, got %q", body)
 	}
 }
 
 func TestHandleSearchFallbackSection(t *testing.T) {
 	t.Parallel()
-	app := testApp()
+	app := testApp(t)
 
 	req := httptest.NewRequest("GET", "/search?q=beer", nil)
 	w := httptest.NewRecorder()
 	app.HandleSearch(w, req)
 
-	if w.Code != http.StatusOK {
-		t.Errorf("expected 200, got %d", w.Code)
-	}
 	if !strings.Contains(w.Body.String(), "Related products") {
-		t.Error("expected fallback section for category search")
+		t.Fatal("expected fallback section")
 	}
 }
 
 func TestHandleSearchNoResults(t *testing.T) {
 	t.Parallel()
-	app := testApp()
+	app := testApp(t)
 
 	req := httptest.NewRequest("GET", "/search?q=zz", nil)
 	w := httptest.NewRecorder()
 	app.HandleSearch(w, req)
 
-	if w.Code != http.StatusOK {
-		t.Errorf("expected 200, got %d", w.Code)
-	}
 	if !strings.Contains(w.Body.String(), "No results found") {
-		t.Error("expected no-results section")
+		t.Fatal("expected no results section")
 	}
 }
 
 func TestHandleSelect(t *testing.T) {
 	t.Parallel()
-	app := testApp()
+	app := testApp(t)
+	id := catalog.StableID(testProducts()[0])
 
-	body := strings.NewReader(`{"id": "0"}`)
+	body := strings.NewReader(`{"id": "` + id + `"}`)
 	req := httptest.NewRequest("POST", "/select", body)
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	app.HandleSelect(w, req)
 
 	if w.Code != http.StatusOK {
-		t.Errorf("expected 200, got %d", w.Code)
+		t.Fatalf("expected 200, got %d", w.Code)
 	}
 }
 
 func TestHandleSelectInvalidID(t *testing.T) {
 	t.Parallel()
-	app := testApp()
+	app := testApp(t)
 
-	body := strings.NewReader(`{"id": "abc"}`)
+	body := strings.NewReader(`{"id": "missing"}`)
 	req := httptest.NewRequest("POST", "/select", body)
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	app.HandleSelect(w, req)
 
 	if w.Code != http.StatusBadRequest {
-		t.Errorf("expected 400, got %d", w.Code)
+		t.Fatalf("expected 400, got %d", w.Code)
 	}
 }

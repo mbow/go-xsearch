@@ -1,12 +1,4 @@
 // Package ranking implements time-decayed popularity scoring for search results.
-//
-// Each product's popularity is computed as the sum of exponentially decayed
-// selection timestamps: score = Σ e^(-λ × age_in_days). This naturally handles
-// both frequency (more selections = higher sum) and recency (older selections
-// contribute less).
-//
-// The [Ranker.ScoreView] method returns a lightweight immutable scorer for a
-// single search operation, avoiding repeated lock work on the hot path.
 package ranking
 
 import (
@@ -16,62 +8,77 @@ import (
 	"io/fs"
 	"math"
 	"os"
+	"strconv"
 	"sync"
 	"time"
 )
 
-// Ranker tracks product selection popularity with exponential time decay.
+// Ranker tracks item selection popularity with exponential time decay.
 type Ranker struct {
 	mu            sync.RWMutex
 	lambda        float64
 	alpha         float64
-	numProducts   int
-	selections    map[int][]time.Time
+	orderedIDs    []string
+	selections    map[string][]time.Time
 	snapshotDirty bool
 	snapshot      popularitySnapshot
 }
 
 type popularitySnapshot struct {
-	scores []float64 // indexed by product ID, normalized to 0.0-1.0
+	scores []float64 // normalized to 0.0-1.0
 }
 
 // ScoreView is an immutable view of the current popularity snapshot.
-// It is cheap to copy and safe to use concurrently.
 type ScoreView struct {
 	scores []float64
 	alpha  float64
 }
 
-// New creates a Ranker with the given decay rate, alpha, and product count.
-func New(lambda, alpha float64, numProducts int) *Ranker {
+// New creates a Ranker with the given decay rate and alpha.
+func New(lambda, alpha float64) *Ranker {
 	return &Ranker{
 		lambda:        lambda,
 		alpha:         alpha,
-		numProducts:   numProducts,
-		selections:    make(map[int][]time.Time),
+		selections:    make(map[string][]time.Time),
 		snapshotDirty: true,
 	}
 }
 
-// RecordSelection records a user selecting a product right now.
-func (r *Ranker) RecordSelection(productID int) {
+// SetIDs sets the ordered list of IDs to align with the search engine slice.
+func (r *Ranker) SetIDs(orderedIDs []string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.selections[productID] = append(r.selections[productID], time.Now())
+	r.orderedIDs = append([]string(nil), orderedIDs...)
 	r.snapshotDirty = true
 }
 
-// SetSelections sets the selection timestamps for a product directly (used for testing and loading from disk).
-func (r *Ranker) SetSelections(productID int, timestamps []time.Time) {
+// RecordSelection records a user selecting an item right now.
+func (r *Ranker) RecordSelection(id string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.selections[productID] = timestamps
+	r.selections[id] = append(r.selections[id], time.Now())
 	r.snapshotDirty = true
 }
 
-// rawScore computes the exponential decay score for a product. Caller must hold at least RLock.
-func (r *Ranker) rawScore(productID int, now time.Time) float64 {
-	timestamps := r.selections[productID]
+// SetSelections sets timestamps directly for testing or migration.
+func (r *Ranker) SetSelections(id string, timestamps []time.Time) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.selections[id] = slicesCloneTimes(timestamps)
+	r.snapshotDirty = true
+}
+
+func slicesCloneTimes(in []time.Time) []time.Time {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]time.Time, len(in))
+	copy(out, in)
+	return out
+}
+
+func (r *Ranker) rawScore(id string, now time.Time) float64 {
+	timestamps := r.selections[id]
 	if len(timestamps) == 0 {
 		return 0
 	}
@@ -83,12 +90,10 @@ func (r *Ranker) rawScore(productID int, now time.Time) float64 {
 	return score
 }
 
-// rebuildSnapshotLocked recalculates normalized popularity scores. Caller must hold lock.
 func (r *Ranker) rebuildSnapshotLocked() {
 	if !r.snapshotDirty {
 		return
 	}
-
 	if len(r.selections) == 0 {
 		r.snapshot = popularitySnapshot{}
 		r.snapshotDirty = false
@@ -96,28 +101,21 @@ func (r *Ranker) rebuildSnapshotLocked() {
 	}
 
 	now := time.Now()
-	scores := make([]float64, r.numProducts)
+	scores := make([]float64, len(r.orderedIDs))
 	maxScore := 0.0
-	for id, timestamps := range r.selections {
-		if id < 0 || id >= r.numProducts {
+	for docIndex, id := range r.orderedIDs {
+		score := r.rawScore(id, now)
+		if score <= 0 {
 			continue
 		}
-		var s float64
-		for _, ts := range timestamps {
-			ageDays := now.Sub(ts).Hours() / 24
-			s += math.Exp(-r.lambda * ageDays)
-		}
-		scores[id] = s
-		if s > maxScore {
-			maxScore = s
+		scores[docIndex] = score
+		if score > maxScore {
+			maxScore = score
 		}
 	}
-
 	if maxScore > 0 {
-		for i, s := range scores {
-			if s > 0 {
-				scores[i] = s / maxScore
-			}
+		for i := range scores {
+			scores[i] /= maxScore
 		}
 	} else {
 		scores = nil
@@ -145,48 +143,25 @@ func (r *Ranker) snapshotView() (popularitySnapshot, float64) {
 	return snapshot, alpha
 }
 
-func (s popularitySnapshot) score(productID int) float64 {
-	if productID < 0 || productID >= len(s.scores) {
-		return 0
-	}
-	return s.scores[productID]
+// Score returns the normalized popularity score for a document slice index.
+// It satisfies xsearch.Scorer.
+func (r *Ranker) Score(docIndex int) float64 {
+	return r.ScoreView().Popularity(docIndex)
 }
 
-// Popularity returns the normalized popularity score for productID.
-func (s ScoreView) Popularity(productID int) float64 {
-	if productID < 0 || productID >= len(s.scores) {
-		return 0
-	}
-	return s.scores[productID]
-}
-
-// Score blends relevance with popularity using the ranker's configured alpha.
-func (s ScoreView) Score(productID int, relevance float64) float64 {
-	pop := s.Popularity(productID)
-	return s.alpha*relevance + (1-s.alpha)*pop
-}
-
-// PopularityScore computes the raw exponential decay score for a product.
-func (r *Ranker) PopularityScore(productID int) float64 {
+// PopularityScore returns the raw exponential decay score.
+func (r *Ranker) PopularityScore(id string) float64 {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	return r.rawScore(productID, time.Now())
+	return r.rawScore(id, time.Now())
 }
 
-// NormalizedPopularity returns the popularity score normalized to 0.0-1.0
-// by dividing by the maximum popularity score across all products.
-// The max is cached and only recomputed when selections change.
-func (r *Ranker) NormalizedPopularity(productID int) float64 {
-	return r.ScoreView().Popularity(productID)
+// CombinedScore blends relevance with popularity using the ranker's alpha.
+func (r *Ranker) CombinedScore(docIndex int, relevance float64) float64 {
+	return r.ScoreView().CombinedScore(docIndex, relevance)
 }
 
-// CombinedScore computes the final ranking score by fusing relevance and popularity.
-// relevance should be in the 0.0-1.0 range (Jaccard similarity).
-func (r *Ranker) CombinedScore(productID int, relevance float64) float64 {
-	return r.ScoreView().Score(productID, relevance)
-}
-
-// ScoreView returns an immutable scorer for the current popularity snapshot.
+// ScoreView returns an immutable scorer view.
 func (r *Ranker) ScoreView() ScoreView {
 	snapshot, alpha := r.snapshotView()
 	return ScoreView{
@@ -195,12 +170,23 @@ func (r *Ranker) ScoreView() ScoreView {
 	}
 }
 
-// Scorer returns the legacy closure-based scoring API.
-func (r *Ranker) Scorer() func(productID int, relevance float64) float64 {
-	view := r.ScoreView()
-	return func(productID int, relevance float64) float64 {
-		return view.Score(productID, relevance)
+// Popularity returns the normalized popularity score for docIndex.
+func (s ScoreView) Popularity(docIndex int) float64 {
+	if s.scores == nil || docIndex < 0 || docIndex >= len(s.scores) {
+		return 0
 	}
+	return s.scores[docIndex]
+}
+
+// Score returns exactly the Popularity score to implement xsearch.Scorer.
+func (s ScoreView) Score(docIndex int) float64 {
+	return s.Popularity(docIndex)
+}
+
+// CombinedScore blends relevance with popularity using the ranker's configured alpha.
+func (s ScoreView) CombinedScore(docIndex int, relevance float64) float64 {
+	pop := s.Popularity(docIndex)
+	return s.alpha*relevance + (1-s.alpha)*pop
 }
 
 // Save writes all selection data to a JSON file at path.
@@ -222,25 +208,62 @@ func (r *Ranker) Save(path string) error {
 	return nil
 }
 
-// Load reads selection data from a JSON file at path. If the file does not
-// exist, this is a no-op (fresh start with no prior popularity data).
+// Load reads the current string-keyed format from path.
 func (r *Ranker) Load(path string) error {
+	_, err := r.LoadWithMigration(path, nil)
+	return err
+}
+
+// LoadWithMigration reads popularity data and migrates the legacy integer-keyed
+// format using orderedIDs when necessary. It returns true when migration occurred.
+func (r *Ranker) LoadWithMigration(path string, orderedIDs []string) (bool, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
-			return nil
+			return false, nil
 		}
-		return fmt.Errorf("ranking: reading %s: %w", path, err)
+		return false, fmt.Errorf("ranking: reading %s: %w", path, err)
+	}
+
+	var raw map[string][]time.Time
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return false, fmt.Errorf("ranking: unmarshaling selections: %w", err)
+	}
+
+	migrated := false
+	mapped := make(map[string][]time.Time, len(raw))
+	allNumeric := len(raw) > 0
+	for key := range raw {
+		if _, err := strconv.Atoi(key); err != nil {
+			allNumeric = false
+			break
+		}
+	}
+
+	if allNumeric {
+		if len(orderedIDs) == 0 {
+			return false, fmt.Errorf("ranking: legacy popularity data requires ordered IDs for migration")
+		}
+		for key, timestamps := range raw {
+			idx, _ := strconv.Atoi(key)
+			if idx < 0 || idx >= len(orderedIDs) {
+				continue
+			}
+			id := orderedIDs[idx]
+			mapped[id] = append(mapped[id], timestamps...)
+		}
+		migrated = true
+	} else {
+		for key, timestamps := range raw {
+			mapped[key] = slicesCloneTimes(timestamps)
+		}
 	}
 
 	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	if err := json.Unmarshal(data, &r.selections); err != nil {
-		return fmt.Errorf("ranking: unmarshaling selections: %w", err)
-	}
+	r.selections = mapped
 	r.snapshotDirty = true
-	return nil
+	r.mu.Unlock()
+	return migrated, nil
 }
 
 // Prune removes selection timestamps older than maxAgeDays.

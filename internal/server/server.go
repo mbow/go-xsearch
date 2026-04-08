@@ -16,42 +16,40 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/mbow/go-xsearch/catalog"
-	"github.com/mbow/go-xsearch/engine"
+	"github.com/mbow/go-xsearch/ranking"
+	"github.com/mbow/go-xsearch/xsearch"
 )
 
 const (
-	MaxQueryLen   = 200 // maximum search query length in bytes
-	maxSelectBody = 256 // maximum POST /select body size in bytes
+	MaxQueryLen   = 200
+	maxSelectBody = 256
 )
 
 // App holds application state and HTTP handlers.
 type App struct {
-	Engine       *engine.Engine
-	TemplateDir  string // path to templates directory (default "templates")
-	indexTmpl    *template.Template
-	Cache        *FragmentCache
-	bufPool      sync.Pool
-	productCount int          // cached product count for validation
-	limiter      *RateLimiter // per-IP rate limiter
+	Engine      *xsearch.Engine
+	Ranker      *ranking.Ranker
+	TemplateDir string
+	indexTmpl   *template.Template
+	Cache       *FragmentCache
+	bufPool     sync.Pool
+	limiter     *RateLimiter
 }
 
-// New creates an App with the given engine and cache size.
-func New(eng *engine.Engine, cacheSize int) *App {
-	productCount, _ := catalog.EmbeddedCount()
+// New creates an App with the given engine, ranker, and cache size.
+func New(eng *xsearch.Engine, ranker *ranking.Ranker, cacheSize int) *App {
 	app := &App{
-		Engine:       eng,
-		TemplateDir:  "templates",
-		Cache:        NewFragmentCache(cacheSize),
-		productCount: productCount,
-		limiter:      NewRateLimiter(50, 10, 5*time.Minute), // 50 req/s burst, 10 req/s sustained
+		Engine:      eng,
+		Ranker:      ranker,
+		TemplateDir: "templates",
+		Cache:       NewFragmentCache(cacheSize),
+		limiter:     NewRateLimiter(50, 10, 5*time.Minute),
 	}
 	app.bufPool = sync.Pool{New: func() any { return new(bytes.Buffer) }}
 	return app
 }
 
 // LoadTemplates parses the HTML templates from the TemplateDir directory.
-// Must be called before serving requests.
 func (app *App) LoadTemplates() {
 	app.indexTmpl = template.Must(template.New("index.html").ParseFiles(app.TemplateDir + "/index.html"))
 }
@@ -64,7 +62,6 @@ func (app *App) Routes(mux *http.ServeMux) {
 	mux.Handle("GET /static/", securityHeaders(http.StripPrefix("/static/", noDirectoryListing(http.Dir("static")))))
 }
 
-// securityHeaders adds standard security response headers.
 func securityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
@@ -75,25 +72,20 @@ func securityHeaders(next http.Handler) http.Handler {
 	})
 }
 
-// csrfCheck rejects cross-origin POST requests by validating the Origin header.
 func csrfCheck(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
 		if origin != "" {
-			// Origin present — verify it matches the Host.
 			host := r.Host
 			if !strings.HasSuffix(origin, "://"+host) {
 				http.Error(w, "cross-origin request rejected", http.StatusForbidden)
 				return
 			}
 		}
-		// No Origin header means same-origin or non-browser client — allow.
-		// HTMX requests include Origin, so legitimate browser requests are covered.
 		next.ServeHTTP(w, r)
 	})
 }
 
-// noDirectoryListing wraps an http.FileSystem to return 404 for directory requests.
 func noDirectoryListing(fs http.FileSystem) http.Handler {
 	fileServer := http.FileServer(fs)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -115,10 +107,8 @@ func (app *App) HandleIndex(w http.ResponseWriter, r *http.Request) {
 // HandleSearch returns search results as an HTML fragment for HTMX.
 func (app *App) HandleSearch(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query().Get("q")
-
 	if len(query) > MaxQueryLen {
 		query = query[:MaxQueryLen]
-		// Ensure we don't split a multi-byte UTF-8 character.
 		for !utf8.ValidString(query) {
 			query = query[:len(query)-1]
 		}
@@ -128,54 +118,64 @@ func (app *App) HandleSearch(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("Content-Length", strconv.Itoa(len(cached)))
 		w.Header().Set("X-Cache", "HIT")
-		w.Write(cached) //nolint:errcheck // best-effort write to HTTP client
+		w.Write(cached) //nolint:errcheck
 		return
 	}
 
-	results := app.Engine.Search(query)
-
+	var opts []xsearch.SearchOption
+	if app.Ranker != nil {
+		opts = append(opts, xsearch.WithScoring(app.Ranker.ScoreView()))
+	}
+	results := app.Engine.Search(query, opts...)
 	buf := app.bufPool.Get().(*bytes.Buffer)
 	buf.Reset()
 	defer app.bufPool.Put(buf)
 
-	renderResultsFragment(buf, query, results)
+	renderResultsFragment(buf, query, results, app.Engine.Get)
 	rendered := bytes.Clone(buf.Bytes())
-
 	app.Cache.Set(query, rendered)
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Content-Length", strconv.Itoa(len(rendered)))
 	w.Header().Set("X-Cache", "MISS")
-	w.Write(rendered) //nolint:errcheck // best-effort write to HTTP client
+	w.Write(rendered) //nolint:errcheck
 }
 
-func renderResultsFragment(buf *bytes.Buffer, query string, results []engine.Result) {
+func renderResultsFragment(buf *bytes.Buffer, query string, results []xsearch.Result, lookup func(string) (xsearch.Item, bool)) {
 	buf.WriteString(`<div id="results-inner" data-ghost="`)
-	buf.WriteString(html.EscapeString(ghostSuffix(query, results)))
+	buf.WriteString(html.EscapeString(ghostSuffix(query, results, lookup)))
 	buf.WriteString("\">\n")
 
 	hasDirect := false
 	for _, res := range results {
-		if res.MatchType != engine.MatchDirect {
+		if res.MatchType != xsearch.MatchDirect {
+			continue
+		}
+		item, ok := lookup(res.ID)
+		if !ok {
 			continue
 		}
 		if !hasDirect {
 			buf.WriteString("<div class=\"result-section\">Results</div>\n")
 			hasDirect = true
 		}
-		writeResultItem(buf, res)
+		writeResultItem(buf, res, item)
 	}
 
 	hasFallback := false
 	for _, res := range results {
-		if res.MatchType != engine.MatchFallback {
+		if res.MatchType != xsearch.MatchFallback {
+			continue
+		}
+		item, ok := lookup(res.ID)
+		if !ok {
 			continue
 		}
 		if !hasFallback {
 			buf.WriteString("<div class=\"result-section\">Related products</div>\n")
 			hasFallback = true
 		}
-		writeResultItem(buf, res)
+		writeResultItem(buf, res, item)
 	}
 
 	if !hasDirect && !hasFallback && query != "" {
@@ -185,35 +185,109 @@ func renderResultsFragment(buf *bytes.Buffer, query string, results []engine.Res
 	buf.WriteString("</div>\n")
 }
 
-func writeResultItem(buf *bytes.Buffer, res engine.Result) {
+func writeResultItem(buf *bytes.Buffer, res xsearch.Result, item xsearch.Item) {
+	_, nameHTML := displayName(item, res.Highlights)
+	category := firstFieldValue(item, "category")
+
 	buf.WriteString("<div class=\"result-item\"\n")
 	buf.WriteString("     hx-post=\"/select\"\n")
 	buf.WriteString("     hx-vals='{\"id\": \"")
-	writeInt(buf, res.ProductID)
+	buf.WriteString(html.EscapeString(res.ID))
 	buf.WriteString("\"}'\n")
 	buf.WriteString("     hx-swap=\"none\"\n")
 	buf.WriteString("     hx-indicator=\"false\">\n")
 	buf.WriteString("    <div class=\"result-name\">")
-	buf.WriteString(string(res.HighlightedName))
+	buf.WriteString(string(nameHTML))
 	buf.WriteString("</div>\n")
 	buf.WriteString("    <div class=\"result-category\">")
-	if res.Product != nil {
-		buf.WriteString(html.EscapeString(res.Product.Category))
+	buf.WriteString(html.EscapeString(category))
+	buf.WriteString("</div>\n")
+	buf.WriteString("</div>\n")
+}
+
+func firstFieldValue(item xsearch.Item, name string) string {
+	for _, field := range item.Fields {
+		if field.Name == name && len(field.Values) > 0 {
+			return field.Values[0]
+		}
 	}
-	buf.WriteString("</div>\n")
-	buf.WriteString("</div>\n")
+	if len(item.Fields) > 0 && len(item.Fields[0].Values) > 0 {
+		return item.Fields[0].Values[0]
+	}
+	return ""
 }
 
-func writeInt(buf *bytes.Buffer, n int) {
-	var scratch [20]byte
-	buf.Write(strconv.AppendInt(scratch[:0], int64(n), 10))
+func displayName(item xsearch.Item, highlights map[string][]xsearch.Highlight) (string, template.HTML) {
+	for _, field := range item.Fields {
+		if field.Name != "name" || len(field.Values) == 0 {
+			continue
+		}
+		valueIndex := 0
+		if hs := highlights["name"]; len(hs) > 0 {
+			valueIndex = hs[0].ValueIndex
+		}
+		if valueIndex < 0 || valueIndex >= len(field.Values) {
+			valueIndex = 0
+		}
+		return field.Values[valueIndex], renderHighlightedValue(field.Values[valueIndex], highlights["name"], valueIndex)
+	}
+	for _, field := range item.Fields {
+		if len(field.Values) == 0 {
+			continue
+		}
+		valueIndex := 0
+		if hs := highlights[field.Name]; len(hs) > 0 {
+			valueIndex = hs[0].ValueIndex
+		}
+		if valueIndex < 0 || valueIndex >= len(field.Values) {
+			valueIndex = 0
+		}
+		return field.Values[valueIndex], renderHighlightedValue(field.Values[valueIndex], highlights[field.Name], valueIndex)
+	}
+	return "", ""
 }
 
-func ghostSuffix(query string, results []engine.Result) string {
-	if len(results) == 0 || results[0].Product == nil {
+func renderHighlightedValue(value string, highlights []xsearch.Highlight, valueIndex int) template.HTML {
+	if len(highlights) == 0 {
+		return template.HTML(html.EscapeString(value))
+	}
+
+	filtered := make([]xsearch.Highlight, 0, len(highlights))
+	for _, h := range highlights {
+		if h.ValueIndex == valueIndex {
+			filtered = append(filtered, xsearch.Highlight{Start: h.Start, End: h.End})
+		}
+	}
+	if len(filtered) == 0 {
+		return template.HTML(html.EscapeString(value))
+	}
+
+	var b strings.Builder
+	prev := 0
+	for _, h := range filtered {
+		if h.Start > prev {
+			b.WriteString(html.EscapeString(value[prev:h.Start]))
+		}
+		b.WriteString("<mark>")
+		b.WriteString(html.EscapeString(value[h.Start:h.End]))
+		b.WriteString("</mark>")
+		prev = h.End
+	}
+	if prev < len(value) {
+		b.WriteString(html.EscapeString(value[prev:]))
+	}
+	return template.HTML(b.String())
+}
+
+func ghostSuffix(query string, results []xsearch.Result, lookup func(string) (xsearch.Item, bool)) string {
+	if len(results) == 0 {
 		return ""
 	}
-	name := results[0].Product.Name
+	item, ok := lookup(results[0].ID)
+	if !ok {
+		return ""
+	}
+	name, _ := displayName(item, results[0].Highlights)
 	if len(query) > len(name) {
 		return ""
 	}
@@ -262,7 +336,7 @@ func containsNonASCII(s string) bool {
 func (app *App) HandleSelect(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxSelectBody)
 
-	var idStr string
+	var id string
 	if r.Header.Get("Content-Type") == "application/json" {
 		var req struct {
 			ID string `json:"id"`
@@ -271,37 +345,34 @@ func (app *App) HandleSelect(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "invalid request body", http.StatusBadRequest)
 			return
 		}
-		idStr = req.ID
+		id = req.ID
 	} else {
-		idStr = r.FormValue("id")
+		id = r.FormValue("id")
 	}
 
-	id, err := strconv.Atoi(idStr)
-	if err != nil || idStr == "" {
+	if id == "" {
 		http.Error(w, "invalid product ID", http.StatusBadRequest)
 		return
 	}
-
-	if id < 0 || id >= app.productCount {
-		http.Error(w, "product ID out of range", http.StatusBadRequest)
+	if _, ok := app.Engine.Get(id); !ok {
+		http.Error(w, "product ID not found", http.StatusBadRequest)
 		return
 	}
 
-	app.Engine.RecordSelection(id)
+	if app.Ranker != nil {
+		app.Ranker.RecordSelection(id)
+	}
 	app.Cache.Invalidate()
 	w.WriteHeader(http.StatusOK)
 }
 
 // FragmentCache is a cache for rendered HTML fragments.
-// Keyed by query string, invalidated when selections change popularity.
-// When full, evicts a random half of entries instead of a full flush.
 type FragmentCache struct {
 	mu      sync.RWMutex
 	entries map[string][]byte
 	maxSize int
 }
 
-// NewFragmentCache creates a new fragment cache with the given capacity.
 func NewFragmentCache(maxSize int) *FragmentCache {
 	return &FragmentCache{
 		entries: make(map[string][]byte, maxSize),
@@ -309,7 +380,6 @@ func NewFragmentCache(maxSize int) *FragmentCache {
 	}
 }
 
-// Get returns the cached fragment for key, if present.
 func (c *FragmentCache) Get(key string) ([]byte, bool) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
@@ -317,14 +387,10 @@ func (c *FragmentCache) Get(key string) ([]byte, bool) {
 	return v, ok
 }
 
-// Set stores a rendered fragment in the cache.
-// When full, randomly evicts half the entries to resist cache flooding.
 func (c *FragmentCache) Set(key string, value []byte) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if len(c.entries) >= c.maxSize {
-		// Evict ~half. Map iteration order is randomized in Go,
-		// so deleting the first half yields random eviction.
 		evictCount := len(c.entries) / 2
 		i := 0
 		maps.DeleteFunc(c.entries, func(_ string, _ []byte) bool {
@@ -338,7 +404,6 @@ func (c *FragmentCache) Set(key string, value []byte) {
 	c.entries[key] = value
 }
 
-// Invalidate clears all cached fragments.
 func (c *FragmentCache) Invalidate() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -349,9 +414,9 @@ func (c *FragmentCache) Invalidate() {
 type RateLimiter struct {
 	mu       sync.Mutex
 	visitors map[string]*visitor
-	burst    int           // max tokens (burst capacity)
-	rate     float64       // tokens per second (sustained rate)
-	ttl      time.Duration // time before idle entries are cleaned up
+	burst    int
+	rate     float64
+	ttl      time.Duration
 }
 
 type visitor struct {
@@ -359,19 +424,15 @@ type visitor struct {
 	lastSeen time.Time
 }
 
-// NewRateLimiter creates a rate limiter with the given burst size,
-// sustained rate (requests/sec), and cleanup TTL for idle IPs.
 func NewRateLimiter(burst int, rate float64, ttl time.Duration) *RateLimiter {
-	rl := &RateLimiter{
+	return &RateLimiter{
 		visitors: make(map[string]*visitor),
 		burst:    burst,
 		rate:     rate,
 		ttl:      ttl,
 	}
-	return rl
 }
 
-// Allow checks whether a request from the given IP should be allowed.
 func (rl *RateLimiter) Allow(ip string) bool {
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
@@ -380,18 +441,15 @@ func (rl *RateLimiter) Allow(ip string) bool {
 	v, ok := rl.visitors[ip]
 	if !ok {
 		rl.visitors[ip] = &visitor{tokens: float64(rl.burst) - 1, lastSeen: now}
-		// Periodically clean up stale entries.
 		if len(rl.visitors)%100 == 0 {
 			rl.cleanupLocked(now)
 		}
 		return true
 	}
 
-	// Replenish tokens based on time elapsed.
 	elapsed := now.Sub(v.lastSeen).Seconds()
 	v.tokens = min(float64(rl.burst), v.tokens+elapsed*rl.rate)
 	v.lastSeen = now
-
 	if v.tokens < 1 {
 		return false
 	}
@@ -399,15 +457,12 @@ func (rl *RateLimiter) Allow(ip string) bool {
 	return true
 }
 
-// cleanupLocked removes visitors that haven't been seen within the TTL.
-// Caller must hold rl.mu.
 func (rl *RateLimiter) cleanupLocked(now time.Time) {
 	maps.DeleteFunc(rl.visitors, func(_ string, v *visitor) bool {
 		return now.Sub(v.lastSeen) > rl.ttl
 	})
 }
 
-// Wrap returns middleware that rate-limits by client IP.
 func (rl *RateLimiter) Wrap(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ip := clientIP(r)
@@ -419,8 +474,6 @@ func (rl *RateLimiter) Wrap(next http.Handler) http.Handler {
 	})
 }
 
-// clientIP extracts the client IP from the request, preferring
-// X-Forwarded-For if behind a reverse proxy, falling back to RemoteAddr.
 func clientIP(r *http.Request) string {
 	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
 		if ip, _, ok := strings.Cut(xff, ","); ok {
@@ -428,7 +481,6 @@ func clientIP(r *http.Request) string {
 		}
 		return strings.TrimSpace(xff)
 	}
-	// RemoteAddr is "ip:port" — strip the port.
 	if host, _, ok := strings.Cut(r.RemoteAddr, ":"); ok {
 		return host
 	}

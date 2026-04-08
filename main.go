@@ -1,8 +1,4 @@
 // Product search HTTP server entry point.
-//
-// Usage:
-//
-//	go run .
 package main
 
 import (
@@ -19,8 +15,9 @@ import (
 	"time"
 
 	"github.com/mbow/go-xsearch/catalog"
-	"github.com/mbow/go-xsearch/engine"
 	"github.com/mbow/go-xsearch/internal/server"
+	"github.com/mbow/go-xsearch/ranking"
+	"github.com/mbow/go-xsearch/xsearch"
 )
 
 const snapshotPeriod = 60 * time.Second
@@ -28,47 +25,41 @@ const snapshotPeriod = 60 * time.Second
 func main() {
 	dataDir := "data"
 
-	products, err := catalog.EmbeddedProducts()
+	products, err := catalog.LoadProducts(filepath.Join(dataDir, "products.json"))
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error loading embedded products: %v\n", err)
+		fmt.Fprintf(os.Stderr, "error loading products: %v\n", err)
 		os.Exit(1)
 	}
 
-	bloomRaw, err := catalog.EmbeddedBloomRaw()
+	snapshot, err := catalog.EmbeddedSnapshot()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error loading embedded bloom: %v\n", err)
+		fmt.Fprintf(os.Stderr, "error loading embedded snapshot: %v\n", err)
 		os.Exit(1)
 	}
 
-	indexRaw, err := catalog.EmbeddedIndexRaw()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "error loading embedded index: %v\n", err)
-		os.Exit(1)
-	}
-
-	bm25Raw, err := catalog.EmbeddedBM25Raw()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "error loading embedded bm25: %v\n", err)
-		os.Exit(1)
-	}
-
-	eng, err := engine.NewFromEmbedded(products, bloomRaw, indexRaw, bm25Raw)
+	ranker := ranking.New(0.05, 0.6)
+	eng, err := xsearch.NewFromSnapshot(snapshot, products,
+		xsearch.WithLimit(10),
+	)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error creating engine: %v\n", err)
 		os.Exit(1)
 	}
+	ranker.SetIDs(eng.IDs())
 
-	app := server.New(eng, 1024)
+	app := server.New(eng, ranker, 1024)
 	app.LoadTemplates()
 
-	// Load popularity data if it exists
 	popPath := filepath.Join(dataDir, "popularity.json")
-	if err := app.Engine.Ranker().Load(popPath); err != nil {
+	migrated, err := ranker.LoadWithMigration(popPath, eng.IDs())
+	if err != nil {
 		log.Printf("warning: could not load popularity data: %v", err)
+	} else if migrated {
+		if err := ranker.Save(popPath); err != nil {
+			log.Printf("warning: could not rewrite migrated popularity data: %v", err)
+		}
 	}
-
-	// Prune old data and start periodic snapshots
-	app.Engine.Ranker().Prune(90)
+	ranker.Prune(90)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -79,7 +70,7 @@ func main() {
 		for {
 			select {
 			case <-ticker.C:
-				if err := app.Engine.Ranker().Save(popPath); err != nil {
+				if err := ranker.Save(popPath); err != nil {
 					log.Printf("error saving popularity data: %v", err)
 				}
 			case <-ctx.Done():
@@ -116,8 +107,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	// Final save of popularity data before exit.
-	if err := app.Engine.Ranker().Save(popPath); err != nil {
+	if err := ranker.Save(popPath); err != nil {
 		log.Printf("error saving final popularity data: %v", err)
 	}
 	log.Println("server stopped")
