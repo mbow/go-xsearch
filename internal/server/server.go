@@ -216,7 +216,7 @@ func renderResultsFragment(buf *bytes.Buffer, query string, results []xsearch.Re
 }
 
 func writeResultItem(buf *bytes.Buffer, res xsearch.Result, item xsearch.Item) {
-	_, nameHTML := displayName(item, res.Highlights)
+	name, nameHighlights, nameValueIndex := displayName(item, res.Highlights)
 	category := firstFieldValue(item, "category")
 
 	buf.WriteString("<div class=\"result-item\"\n")
@@ -227,7 +227,7 @@ func writeResultItem(buf *bytes.Buffer, res xsearch.Result, item xsearch.Item) {
 	buf.WriteString("     hx-swap=\"none\"\n")
 	buf.WriteString("     hx-indicator=\"false\">\n")
 	buf.WriteString("    <div class=\"result-name\">")
-	buf.WriteString(string(nameHTML))
+	writeHighlightedValue(buf, name, nameHighlights, nameValueIndex)
 	buf.WriteString("</div>\n")
 	buf.WriteString("    <div class=\"result-category\">")
 	buf.WriteString(html.EscapeString(category))
@@ -247,7 +247,7 @@ func firstFieldValue(item xsearch.Item, name string) string {
 	return ""
 }
 
-func displayName(item xsearch.Item, highlights map[string][]xsearch.Highlight) (string, template.HTML) {
+func displayName(item xsearch.Item, highlights map[string][]xsearch.Highlight) (string, []xsearch.Highlight, int) {
 	for _, field := range item.Fields {
 		if field.Name != "name" || len(field.Values) == 0 {
 			continue
@@ -259,7 +259,7 @@ func displayName(item xsearch.Item, highlights map[string][]xsearch.Highlight) (
 		if valueIndex < 0 || valueIndex >= len(field.Values) {
 			valueIndex = 0
 		}
-		return field.Values[valueIndex], renderHighlightedValue(field.Values[valueIndex], highlights["name"], valueIndex)
+		return field.Values[valueIndex], highlights["name"], valueIndex
 	}
 	for _, field := range item.Fields {
 		if len(field.Values) == 0 {
@@ -272,41 +272,39 @@ func displayName(item xsearch.Item, highlights map[string][]xsearch.Highlight) (
 		if valueIndex < 0 || valueIndex >= len(field.Values) {
 			valueIndex = 0
 		}
-		return field.Values[valueIndex], renderHighlightedValue(field.Values[valueIndex], highlights[field.Name], valueIndex)
+		return field.Values[valueIndex], highlights[field.Name], valueIndex
 	}
-	return "", ""
+	return "", nil, 0
 }
 
-func renderHighlightedValue(value string, highlights []xsearch.Highlight, valueIndex int) template.HTML {
+func writeHighlightedValue(buf *bytes.Buffer, value string, highlights []xsearch.Highlight, valueIndex int) {
 	if len(highlights) == 0 {
-		return template.HTML(html.EscapeString(value))
+		buf.WriteString(html.EscapeString(value))
+		return
 	}
 
-	filtered := make([]xsearch.Highlight, 0, len(highlights))
-	for _, h := range highlights {
-		if h.ValueIndex == valueIndex {
-			filtered = append(filtered, xsearch.Highlight{Start: h.Start, End: h.End})
-		}
-	}
-	if len(filtered) == 0 {
-		return template.HTML(html.EscapeString(value))
-	}
-
-	var b strings.Builder
 	prev := 0
-	for _, h := range filtered {
-		if h.Start > prev {
-			b.WriteString(html.EscapeString(value[prev:h.Start]))
+	matched := false
+	for _, h := range highlights {
+		if h.ValueIndex != valueIndex {
+			continue
 		}
-		b.WriteString("<mark>")
-		b.WriteString(html.EscapeString(value[h.Start:h.End]))
-		b.WriteString("</mark>")
+		matched = true
+		if h.Start > prev {
+			buf.WriteString(html.EscapeString(value[prev:h.Start]))
+		}
+		buf.WriteString("<mark>")
+		buf.WriteString(html.EscapeString(value[h.Start:h.End]))
+		buf.WriteString("</mark>")
 		prev = h.End
 	}
-	if prev < len(value) {
-		b.WriteString(html.EscapeString(value[prev:]))
+	if !matched {
+		buf.WriteString(html.EscapeString(value))
+		return
 	}
-	return template.HTML(b.String())
+	if prev < len(value) {
+		buf.WriteString(html.EscapeString(value[prev:]))
+	}
 }
 
 func ghostSuffix(query string, results []xsearch.Result, lookup func(string) (xsearch.Item, bool)) string {
@@ -317,7 +315,7 @@ func ghostSuffix(query string, results []xsearch.Result, lookup func(string) (xs
 	if !ok {
 		return ""
 	}
-	name, _ := displayName(item, results[0].Highlights)
+	name, _, _ := displayName(item, results[0].Highlights)
 	if len(query) > len(name) {
 		return ""
 	}

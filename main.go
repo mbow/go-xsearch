@@ -105,7 +105,7 @@ func main() {
 
 	log.Printf("starting server on %s", addr)
 	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		log.Fatal(err)
+		log.Printf("fatal: server error: %v", err)
 	}
 
 	if err := ranker.Save(popPath); err != nil {

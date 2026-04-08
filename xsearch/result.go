@@ -3,6 +3,7 @@ package xsearch
 // MatchType indicates how a result was found.
 type MatchType int
 
+// MatchType values.
 const (
 	MatchDirect   MatchType = iota // Found via direct n-gram or BM25 match
 	MatchFallback                  // Found via fallback group

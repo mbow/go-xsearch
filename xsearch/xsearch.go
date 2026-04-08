@@ -3,6 +3,7 @@ package xsearch
 import (
 	"cmp"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 )
@@ -237,14 +238,7 @@ func (e *Engine) Search(query string, opts ...SearchOption) []Result {
 		}
 	} else {
 		if e.bloom != nil {
-			anyPass := false
-			for _, gram := range queryGrams {
-				if e.bloom.MayContain(gram) {
-					anyPass = true
-					break
-				}
-			}
-			if !anyPass {
+			if !slices.ContainsFunc(queryGrams, e.bloom.MayContain) {
 				if docs, ok := e.fallback.best(query, queryGrams); ok {
 					return e.resultsForCandidates(query, fallbackCandidates(docs, nil), sCfg)
 				}
@@ -273,9 +267,7 @@ func (e *Engine) Search(query string, opts ...SearchOption) []Result {
 
 	if len(direct) < defaultMinDirectResults {
 		if docs, ok := e.fallback.best(query, queryGrams); ok {
-			for docID, cand := range fallbackCandidates(docs, direct) {
-				direct[docID] = cand
-			}
+			maps.Copy(direct, fallbackCandidates(docs, direct))
 		}
 	}
 
@@ -370,16 +362,28 @@ func (e *Engine) resultsForCandidates(query string, candidates map[int]scoredCan
 func computeHighlights(item preparedItem, query string) map[string][]Highlight {
 	var wordBuf [8]string
 	queryWords := appendQueryWords(wordBuf[:0], query)
+	singleWordQuery := len(queryWords) == 1 && queryWords[0] == query
 
 	var out map[string][]Highlight
 	for _, field := range item.Fields {
-		var highlights []Highlight
+		var fieldHighlights []Highlight
 		for valueIndex := range field.Values {
 			lowerValue := field.Values[valueIndex]
 			if valueIndex < len(field.LowerValues) {
 				lowerValue = field.LowerValues[valueIndex]
 			} else {
 				lowerValue = toLowerFast(lowerValue)
+			}
+
+			if singleWordQuery {
+				if pos := strings.Index(lowerValue, query); pos >= 0 {
+					fieldHighlights = append(fieldHighlights, Highlight{
+						Start:      pos,
+						End:        pos + len(query),
+						ValueIndex: valueIndex,
+					})
+				}
+				continue
 			}
 
 			var localBuf [8]Highlight
@@ -403,15 +407,19 @@ func computeHighlights(item preparedItem, query string) map[string][]Highlight {
 					})
 				}
 			}
-			if len(local) > 0 {
-				highlights = append(highlights, local...)
+			switch len(local) {
+			case 0:
+			case 1:
+				fieldHighlights = append(fieldHighlights, local[0])
+			default:
+				fieldHighlights = append(fieldHighlights, mergeHighlights(local)...)
 			}
 		}
-		if len(highlights) > 0 {
+		if len(fieldHighlights) > 0 {
 			if out == nil {
 				out = make(map[string][]Highlight)
 			}
-			out[field.Name] = mergeHighlights(highlights)
+			out[field.Name] = fieldHighlights
 		}
 	}
 	if out == nil {

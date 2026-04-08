@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"math"
 	"slices"
+	"strings"
 	"sync"
 )
 
@@ -106,13 +107,7 @@ func newBM25Index(items []preparedItem, cfg engineConfig) *bm25Index {
 				fieldStats[field.Name] = &stats{df: make(map[string]int)}
 			}
 
-			doc := ""
-			for i, value := range field.Values {
-				if i > 0 {
-					doc += " "
-				}
-				doc += value
-			}
+			doc := strings.Join(field.Values, " ")
 			tokens := tokenize(doc)
 			if len(tokens) == 0 {
 				continue
