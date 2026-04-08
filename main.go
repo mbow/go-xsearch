@@ -48,6 +48,7 @@ func main() {
 	ranker.SetIDs(eng.IDs())
 
 	app := server.New(eng, ranker, 1024)
+	app.Lookup = server.StaticLookup(products)
 	app.LoadTemplates()
 
 	popPath := filepath.Join(dataDir, "popularity.json")

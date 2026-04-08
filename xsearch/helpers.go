@@ -138,7 +138,7 @@ func hasAlphanumeric(s string) bool {
 	return false
 }
 
-func forEachQueryWord(query string, yield func(word string)) {
+func appendQueryWords(dst []string, query string) []string {
 	start := -1
 	for i := 0; i <= len(query); i++ {
 		if i < len(query) && !isASCIIWhitespace(query[i]) {
@@ -148,10 +148,11 @@ func forEachQueryWord(query string, yield func(word string)) {
 			continue
 		}
 		if start >= 0 {
-			yield(query[start:i])
+			dst = append(dst, query[start:i])
 			start = -1
 		}
 	}
+	return dst
 }
 
 func mergeHighlights(hs []Highlight) []Highlight {

@@ -2,7 +2,6 @@ package xsearch
 
 import (
 	"cmp"
-	"container/heap"
 	"fmt"
 	"slices"
 	"strings"
@@ -66,23 +65,21 @@ type scoredCandidate struct {
 	score     float64
 }
 
-type candidateHeap []scoredCandidate
-
-func (h candidateHeap) Len() int { return len(h) }
-func (h candidateHeap) Less(i, j int) bool {
-	if h[i].score != h[j].score {
-		return h[i].score < h[j].score
+func candidateBetter(a, b scoredCandidate) bool {
+	if a.score != b.score {
+		return a.score > b.score
 	}
-	return h[i].doc > h[j].doc // tiebreak: lower doc ID is better, so it goes deeper in min-heap
+	return a.doc < b.doc
 }
-func (h candidateHeap) Swap(i, j int)      { h[i], h[j] = h[j], h[i] }
-func (h *candidateHeap) Push(x any)        { *h = append(*h, x.(scoredCandidate)) }
-func (h *candidateHeap) Pop() any {
-	old := *h
-	n := len(old)
-	x := old[n-1]
-	*h = old[0 : n-1]
-	return x
+
+func worstCandidateIndex(candidates []scoredCandidate) int {
+	worst := 0
+	for i := 1; i < len(candidates); i++ {
+		if candidateBetter(candidates[worst], candidates[i]) {
+			worst = i
+		}
+	}
+	return worst
 }
 
 // New creates a search engine from a slice of Searchable items.
@@ -307,9 +304,10 @@ func (e *Engine) resultsForCandidates(query string, candidates map[int]scoredCan
 		return nil
 	}
 
-	rawScores := make(map[int]float64, len(candidates))
+	var rawScores map[int]float64
 	maxRaw := 0.0
 	if sCfg.scorer != nil {
+		rawScores = make(map[int]float64, len(candidates))
 		for docID := range candidates {
 			raw := sanitizeScorerValue(sCfg.scorer.Score(docID))
 			rawScores[docID] = raw
@@ -323,24 +321,33 @@ func (e *Engine) resultsForCandidates(query string, candidates map[int]scoredCan
 	if limit <= 0 {
 		limit = 10
 	}
-	h := make(candidateHeap, 0, limit)
+	if limit > len(candidates) {
+		limit = len(candidates)
+	}
+	scored := make([]scoredCandidate, 0, limit)
 
 	for docID, cand := range candidates {
-		norm := 0.0
-		if maxRaw > 0 {
-			norm = rawScores[docID] / maxRaw
+		if rawScores == nil {
+			cand.score = cand.relevance
+		} else {
+			norm := 0.0
+			if maxRaw > 0 {
+				norm = rawScores[docID] / maxRaw
+			}
+			cand.score = (1-e.cfg.alpha)*cand.relevance + e.cfg.alpha*norm
 		}
-		cand.score = (1-e.cfg.alpha)*cand.relevance + e.cfg.alpha*norm
 
-		if len(h) < limit {
-			heap.Push(&h, cand)
-		} else if cand.score > h[0].score || (cand.score == h[0].score && cand.doc < h[0].doc) {
-			h[0] = cand
-			heap.Fix(&h, 0)
+		if len(scored) < limit {
+			scored = append(scored, cand)
+			continue
+		}
+
+		worst := worstCandidateIndex(scored)
+		if candidateBetter(cand, scored[worst]) {
+			scored[worst] = cand
 		}
 	}
 
-	scored := []scoredCandidate(h)
 	slices.SortFunc(scored, func(a, b scoredCandidate) int {
 		if a.score != b.score {
 			return cmp.Compare(b.score, a.score)
@@ -361,13 +368,23 @@ func (e *Engine) resultsForCandidates(query string, candidates map[int]scoredCan
 }
 
 func computeHighlights(item preparedItem, query string) map[string][]Highlight {
-	out := make(map[string][]Highlight)
+	var wordBuf [8]string
+	queryWords := appendQueryWords(wordBuf[:0], query)
+
+	var out map[string][]Highlight
 	for _, field := range item.Fields {
 		var highlights []Highlight
 		for valueIndex := range field.Values {
-			lowerValue := field.LowerValues[valueIndex]
-			var local []Highlight
-			forEachQueryWord(query, func(word string) {
+			lowerValue := field.Values[valueIndex]
+			if valueIndex < len(field.LowerValues) {
+				lowerValue = field.LowerValues[valueIndex]
+			} else {
+				lowerValue = toLowerFast(lowerValue)
+			}
+
+			var localBuf [8]Highlight
+			local := localBuf[:0]
+			for _, word := range queryWords {
 				pos := strings.Index(lowerValue, word)
 				if pos >= 0 {
 					local = append(local, Highlight{
@@ -376,7 +393,7 @@ func computeHighlights(item preparedItem, query string) map[string][]Highlight {
 						ValueIndex: valueIndex,
 					})
 				}
-			})
+			}
 			if len(local) == 0 {
 				if pos := strings.Index(lowerValue, query); pos >= 0 {
 					local = append(local, Highlight{
@@ -387,14 +404,17 @@ func computeHighlights(item preparedItem, query string) map[string][]Highlight {
 				}
 			}
 			if len(local) > 0 {
-				highlights = append(highlights, mergeHighlights(local)...)
+				highlights = append(highlights, local...)
 			}
 		}
 		if len(highlights) > 0 {
+			if out == nil {
+				out = make(map[string][]Highlight)
+			}
 			out[field.Name] = mergeHighlights(highlights)
 		}
 	}
-	if len(out) == 0 {
+	if out == nil {
 		return nil
 	}
 	return out

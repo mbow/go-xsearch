@@ -38,6 +38,11 @@ func benchRuntime(b *testing.B) (*xsearch.Engine, *ranking.Ranker) {
 func BenchmarkHTTPServer_Search_ColdCache(b *testing.B) {
 	engine, ranker := benchRuntime(b)
 	app := server.New(engine, ranker, 1024)
+	products, err := catalog.LoadProducts("../data/products.json")
+	if err != nil {
+		b.Fatal(err)
+	}
+	app.Lookup = server.StaticLookup(products)
 	app.TemplateDir = "../templates"
 	app.LoadTemplates()
 
@@ -53,6 +58,11 @@ func BenchmarkHTTPServer_Search_ColdCache(b *testing.B) {
 func BenchmarkHTTPServer_Search_WarmCache(b *testing.B) {
 	engine, ranker := benchRuntime(b)
 	app := server.New(engine, ranker, 1024)
+	products, err := catalog.LoadProducts("../data/products.json")
+	if err != nil {
+		b.Fatal(err)
+	}
+	app.Lookup = server.StaticLookup(products)
 	app.TemplateDir = "../templates"
 	app.LoadTemplates()
 
@@ -71,6 +81,11 @@ func BenchmarkHTTPServer_Search_WarmCache(b *testing.B) {
 func BenchmarkHTTPServer_Select(b *testing.B) {
 	engine, ranker := benchRuntime(b)
 	app := server.New(engine, ranker, 1024)
+	products, err := catalog.LoadProducts("../data/products.json")
+	if err != nil {
+		b.Fatal(err)
+	}
+	app.Lookup = server.StaticLookup(products)
 	app.TemplateDir = "../templates"
 	app.LoadTemplates()
 	id := engine.IDs()[0]
@@ -245,6 +260,11 @@ func BenchmarkParallel_EngineSearch(b *testing.B) {
 func BenchmarkParallel_HTTPSearch(b *testing.B) {
 	engine, ranker := benchRuntime(b)
 	app := server.New(engine, ranker, 1024)
+	products, err := catalog.LoadProducts("../data/products.json")
+	if err != nil {
+		b.Fatal(err)
+	}
+	app.Lookup = server.StaticLookup(products)
 	app.TemplateDir = "../templates"
 	app.LoadTemplates()
 

@@ -29,6 +29,7 @@ const (
 type App struct {
 	Engine      *xsearch.Engine
 	Ranker      *ranking.Ranker
+	Lookup      func(string) (xsearch.Item, bool)
 	TemplateDir string
 	indexTmpl   *template.Template
 	Cache       *FragmentCache
@@ -36,11 +37,36 @@ type App struct {
 	limiter     *RateLimiter
 }
 
+// StaticLookup builds a read-only item lookup from source items for render-time use.
+func StaticLookup[T xsearch.Searchable](items []T) func(string) (xsearch.Item, bool) {
+	lookup := make(map[string]xsearch.Item, len(items))
+	for _, item := range items {
+		fields := item.SearchFields()
+		clonedFields := make([]xsearch.Field, len(fields))
+		for i, field := range fields {
+			clonedFields[i] = xsearch.Field{
+				Name:   field.Name,
+				Values: append([]string(nil), field.Values...),
+				Weight: field.Weight,
+			}
+		}
+		lookup[item.SearchID()] = xsearch.Item{
+			ID:     item.SearchID(),
+			Fields: clonedFields,
+		}
+	}
+	return func(id string) (xsearch.Item, bool) {
+		item, ok := lookup[id]
+		return item, ok
+	}
+}
+
 // New creates an App with the given engine, ranker, and cache size.
 func New(eng *xsearch.Engine, ranker *ranking.Ranker, cacheSize int) *App {
 	app := &App{
 		Engine:      eng,
 		Ranker:      ranker,
+		Lookup:      eng.Get,
 		TemplateDir: "templates",
 		Cache:       NewFragmentCache(cacheSize),
 		limiter:     NewRateLimiter(50, 10, 5*time.Minute),
@@ -131,7 +157,11 @@ func (app *App) HandleSearch(w http.ResponseWriter, r *http.Request) {
 	buf.Reset()
 	defer app.bufPool.Put(buf)
 
-	renderResultsFragment(buf, query, results, app.Engine.Get)
+	lookup := app.Lookup
+	if lookup == nil {
+		lookup = app.Engine.Get
+	}
+	renderResultsFragment(buf, query, results, lookup)
 	rendered := bytes.Clone(buf.Bytes())
 	app.Cache.Set(query, rendered)
 

@@ -2,7 +2,6 @@ package xsearch
 
 import (
 	"cmp"
-	"maps"
 	"slices"
 	"strings"
 	"sync"
@@ -22,7 +21,7 @@ type prefixEntry struct {
 }
 
 type ngramIndex struct {
-	fields       map[string]*ngramFieldIndex
+	fields        map[string]*ngramFieldIndex
 	sortedPrimary []prefixEntry
 }
 
@@ -125,9 +124,7 @@ func (idx *ngramIndex) SearchWithGrams(queryGrams []string) []ngramSearchResult 
 	}
 	accum := make(map[int]float64)
 	for _, fieldIdx := range idx.fields {
-		for _, result := range fieldIdx.searchWithGrams(queryGrams) {
-			accum[result.Doc] += result.Score
-		}
+		fieldIdx.searchWithGramsInto(queryGrams, accum)
 	}
 	results := make([]ngramSearchResult, 0, len(accum))
 	for docID, score := range accum {
@@ -150,9 +147,9 @@ type gramEntry struct {
 	size int
 }
 
-func (fi *ngramFieldIndex) searchWithGrams(queryGrams []string) []ngramSearchResult {
+func (fi *ngramFieldIndex) searchWithGramsInto(queryGrams []string, accum map[int]float64) {
 	if len(queryGrams) == 0 {
-		return nil
+		return
 	}
 
 	var sortBuf [16]gramEntry
@@ -197,7 +194,6 @@ func (fi *ngramFieldIndex) searchWithGrams(queryGrams []string) []ngramSearchRes
 
 	minHits := uint8(min(255, max(1, len(queryGrams)/3)))
 
-	results := make([]ngramSearchResult, 0, len(touched))
 	for _, docID := range touched {
 		h := hits[docID]
 		if h < minHits {
@@ -208,18 +204,13 @@ func (fi *ngramFieldIndex) searchWithGrams(queryGrams []string) []ngramSearchRes
 		if unionSize <= 0 || fi.docWeights[docID] <= 0 {
 			continue
 		}
-		results = append(results, ngramSearchResult{
-			Doc:   docID,
-			Score: (float64(intersection) / float64(unionSize)) * fi.docWeights[docID],
-		})
+		accum[docID] += (float64(intersection) / float64(unionSize)) * fi.docWeights[docID]
 	}
 
 	for _, docID := range touched {
 		hits[docID] = 0
 	}
 	fi.hitsPool.Put(hitsPtr)
-
-	return results
 }
 
 func (idx *ngramIndex) prefixSearch(query string) []ngramSearchResult {
@@ -288,6 +279,7 @@ func ngramFromSnapshot(s ngramSnapshot, n int) *ngramIndex {
 type fallbackIndex struct {
 	groupDocs  map[string][]int
 	groupGrams map[string][]string
+	gramGroups map[string][]string
 }
 
 func newFallbackIndex(items []preparedItem, fieldName string) *fallbackIndex {
@@ -297,6 +289,7 @@ func newFallbackIndex(items []preparedItem, fieldName string) *fallbackIndex {
 	idx := &fallbackIndex{
 		groupDocs:  make(map[string][]int),
 		groupGrams: make(map[string][]string),
+		gramGroups: make(map[string][]string),
 	}
 
 	for docID, item := range items {
@@ -322,7 +315,11 @@ func newFallbackIndex(items []preparedItem, fieldName string) *fallbackIndex {
 	for key := range idx.groupDocs {
 		grams := extractNormalizedTrigrams(nil, key)
 		slices.Sort(grams)
-		idx.groupGrams[key] = slices.Compact(grams)
+		grams = slices.Compact(grams)
+		idx.groupGrams[key] = grams
+		for _, gram := range grams {
+			idx.gramGroups[gram] = append(idx.gramGroups[gram], key)
+		}
 	}
 
 	return idx
@@ -359,8 +356,14 @@ func (idx *fallbackIndex) best(query string, queryGrams []string) ([]int, bool) 
 
 	bestName := ""
 	bestScore := 0.0
-	for key, grams := range idx.groupGrams {
-		intersection := countIntersection(queryGrams, grams)
+	candidates := make(map[string]int, len(queryGrams))
+	for _, gram := range queryGrams {
+		for _, key := range idx.gramGroups[gram] {
+			candidates[key]++
+		}
+	}
+	for key, intersection := range candidates {
+		grams := idx.groupGrams[key]
 		if intersection == 0 {
 			continue
 		}
@@ -375,28 +378,5 @@ func (idx *fallbackIndex) best(query string, queryGrams []string) ([]int, bool) 
 		return nil, false
 	}
 	return idx.groupDocs[bestName], true
-}
-
-func countIntersection(sortedA, sortedB []string) int {
-	i, j, count := 0, 0, 0
-	for i < len(sortedA) && j < len(sortedB) {
-		if sortedA[i] == sortedB[j] {
-			count++
-			i++
-			j++
-		} else if sortedA[i] < sortedB[j] {
-			i++
-		} else {
-			j++
-		}
-	}
-	return count
-}
-
-func (idx *fallbackIndex) groups() []string {
-	if idx == nil {
-		return nil
-	}
-	return slices.Collect(maps.Keys(idx.groupDocs))
 }
 

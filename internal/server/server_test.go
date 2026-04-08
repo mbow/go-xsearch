@@ -36,6 +36,7 @@ func testApp(t *testing.T) *App {
 	t.Helper()
 	engine, ranker := testEngine(t)
 	app := New(engine, ranker, 64)
+	app.Lookup = StaticLookup(testProducts())
 	app.TemplateDir = "../../templates"
 	app.LoadTemplates()
 	return app
