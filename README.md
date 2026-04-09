@@ -76,7 +76,7 @@ go-xsearch/                            # THIS REPO — sample application
   ranking/                             # Popularity scorer, implements xsearch.Scorer
   internal/server/                     # HTTP handlers, HTMX, caching, rate limiting
   cmd/generate/                        # JSON -> CBOR index generation
-  main.go                              # Wires xsearch + server + ranking
+  main.go                              # Wires xsearch + server + ranking + prefix cache
   benchmarks/suite_test.go             # Performance regression suite
   templates/                           # HTMX templates (highlights, ghost text, keyboard nav)
   static/htmx.min.js                  # Vendored HTMX 2.0.8
@@ -97,7 +97,8 @@ library has no knowledge of products, HTTP, or HTMX.
 ```
 Query -> xsearch.Engine.Search()
            |
-           +-> Normalize -> Extract trigrams -> Bloom pre-check
+           +-> Normalize -> Prefix cache hit? (no scorer) -> return cached results
+           +-> Extract trigrams -> Bloom pre-check
                                                   |
                                              NO match -> fallback group only
                                                   |
@@ -148,6 +149,7 @@ Full HTTP round-trip benchmarks on 10,000 products, AMD Ryzen 9 5950X.
 
 ### Key Optimisations
 
+- **Prefix cache** — precomputed results for 1-2 char queries return in ~28ns with 1 alloc; bypassed when external scoring is active
 - **Bloom-first pipeline** — rejects gibberish before scoring runs
 - **Per-field inverted indices** — each field maintains its own posting lists
   and IDF tables
