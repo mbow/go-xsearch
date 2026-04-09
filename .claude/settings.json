@@ -1,4 +1,10 @@
 {
+  "permissions": {
+    "allow": [
+      "Bash(ls -lh /home/mbow/code/search/*.prof)",
+      "Bash(ls *.prof)"
+    ]
+  },
   "enabledPlugins": {
     "document-skills@anthropic-agent-skills": true
   }
