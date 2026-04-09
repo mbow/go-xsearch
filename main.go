@@ -38,8 +38,10 @@ func main() {
 	}
 
 	ranker := ranking.New(0.05, 0.6)
+	prefixes := catalog.ExtractPrefixes(products)
 	eng, err := xsearch.NewFromSnapshot(snapshot, products,
 		xsearch.WithLimit(10),
+		xsearch.WithPrefixCache(prefixes),
 	)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error creating engine: %v\n", err)
