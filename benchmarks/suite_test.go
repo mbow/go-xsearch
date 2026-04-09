@@ -22,8 +22,12 @@ func benchRuntime(b *testing.B) (*xsearch.Engine, *ranking.Ranker) {
 	if err != nil {
 		b.Fatal(err)
 	}
+	prefixes := catalog.ExtractPrefixes(products)
 	ranker := ranking.New(0.05, 0.6)
-	engine, err := xsearch.NewFromSnapshot(snapshot, products, xsearch.WithLimit(10))
+	engine, err := xsearch.NewFromSnapshot(snapshot, products,
+		xsearch.WithLimit(10),
+		xsearch.WithPrefixCache(prefixes),
+	)
 	if err != nil {
 		b.Fatal(err)
 	}
