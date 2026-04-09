@@ -8,7 +8,7 @@ import (
 
 	"github.com/mbow/go-xsearch/catalog"
 	"github.com/mbow/go-xsearch/ranking"
-	"github.com/mbow/go-xsearch/xsearch"
+	"github.com/mbow/xsearch"
 )
 
 func testProducts() []catalog.Product {

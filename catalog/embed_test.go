@@ -3,7 +3,7 @@ package catalog
 import (
 	"testing"
 
-	"github.com/mbow/go-xsearch/xsearch"
+	"github.com/mbow/xsearch"
 )
 
 func TestEmbeddedSnapshot(t *testing.T) {

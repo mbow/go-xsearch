@@ -17,7 +17,7 @@ import (
 	"github.com/mbow/go-xsearch/catalog"
 	"github.com/mbow/go-xsearch/internal/server"
 	"github.com/mbow/go-xsearch/ranking"
-	"github.com/mbow/go-xsearch/xsearch"
+	"github.com/mbow/xsearch"
 )
 
 const snapshotPeriod = 60 * time.Second

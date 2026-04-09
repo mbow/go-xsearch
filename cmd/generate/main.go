@@ -8,7 +8,7 @@ import (
 	"os"
 
 	"github.com/mbow/go-xsearch/catalog"
-	"github.com/mbow/go-xsearch/xsearch"
+	"github.com/mbow/xsearch"
 )
 
 func main() {

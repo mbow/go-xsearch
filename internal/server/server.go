@@ -17,7 +17,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/mbow/go-xsearch/ranking"
-	"github.com/mbow/go-xsearch/xsearch"
+	"github.com/mbow/xsearch"
 )
 
 const (

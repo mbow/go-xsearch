@@ -10,7 +10,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/mbow/go-xsearch/xsearch"
+	"github.com/mbow/xsearch"
 )
 
 // Product represents a single item in the product catalog.
