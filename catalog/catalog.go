@@ -75,6 +75,26 @@ func slugify(s string) string {
 	return out
 }
 
+// ExtractPrefixes returns deduplicated 1-2 character prefixes from all
+// product names, lowercased. Used to populate xsearch.WithPrefixCache.
+func ExtractPrefixes(products []Product) []string {
+	seen := make(map[string]struct{}, len(products)*2)
+	for _, p := range products {
+		name := strings.ToLower(p.Name)
+		if len(name) >= 1 {
+			seen[name[:1]] = struct{}{}
+		}
+		if len(name) >= 2 {
+			seen[name[:2]] = struct{}{}
+		}
+	}
+	prefixes := make([]string, 0, len(seen))
+	for p := range seen {
+		prefixes = append(prefixes, p)
+	}
+	return prefixes
+}
+
 // LoadProducts reads a JSON file at path and returns the parsed products.
 func LoadProducts(path string) ([]Product, error) {
 	data, err := os.ReadFile(path)

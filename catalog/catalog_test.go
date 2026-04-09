@@ -64,6 +64,39 @@ func TestLoadProductsInvalidJSON(t *testing.T) {
 	}
 }
 
+func TestExtractPrefixes(t *testing.T) {
+	t.Parallel()
+	products := []Product{
+		{Name: "Budweiser", Category: "beer"},
+		{Name: "Bud Light", Category: "beer"},
+		{Name: "Nike Air Max", Category: "shoes"},
+	}
+
+	prefixes := ExtractPrefixes(products)
+	if len(prefixes) == 0 {
+		t.Fatal("expected prefixes")
+	}
+
+	has := make(map[string]bool, len(prefixes))
+	for _, p := range prefixes {
+		has[p] = true
+	}
+
+	for _, want := range []string{"b", "bu", "n", "ni"} {
+		if !has[want] {
+			t.Errorf("missing expected prefix %q", want)
+		}
+	}
+
+	seen := make(map[string]struct{}, len(prefixes))
+	for _, p := range prefixes {
+		if _, ok := seen[p]; ok {
+			t.Errorf("duplicate prefix %q", p)
+		}
+		seen[p] = struct{}{}
+	}
+}
+
 func TestStableID(t *testing.T) {
 	t.Parallel()
 	id := StableID(Product{Name: "Bud Light", Category: "beer"})
