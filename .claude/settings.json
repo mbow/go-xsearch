@@ -2,10 +2,9 @@
   "permissions": {
     "allow": [
       "Bash(ls -lh /home/mbow/code/search/*.prof)",
-      "Bash(ls *.prof)"
+      "Bash(ls *.prof)",
+      "Bash(grep -n \"prefixQuery\\\\|exactQuery\\\\|CachedPrefix\\\\|CategoryFallback\" benchmark_*.go)",
+      "Bash(ls -la *.md)"
     ]
-  },
-  "enabledPlugins": {
-    "document-skills@anthropic-agent-skills": true
   }
 }

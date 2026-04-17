@@ -4,9 +4,10 @@ go 1.26.1
 
 require (
 	github.com/fxamacker/cbor/v2 v2.9.1 // indirect
-	github.com/mbow/xsearch v0.0.2
+	github.com/mbow/xsearch v0.2.1
 )
 
-require github.com/x448/float16 v0.8.4 // indirect
-
-replace github.com/mbow/xsearch => /home/mbow/code/search/xsearch
+require (
+	github.com/x448/float16 v0.8.4 // indirect
+	golang.org/x/text v0.36.0 // indirect
+)
